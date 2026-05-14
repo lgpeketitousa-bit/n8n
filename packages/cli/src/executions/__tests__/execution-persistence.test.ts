@@ -727,7 +727,7 @@ describe('ExecutionPersistence', () => {
 		});
 	});
 
-	describe('findById', () => {
+	describe('findSingleExecution', () => {
 		const executionId = 'exec-1';
 		const workflowId = 'wf-1';
 
@@ -766,7 +766,7 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('fs');
 			executionRepository.findSingleExecution.mockResolvedValue({ id: executionId } as never);
 
-			const result = await executionPersistence.findById(executionId);
+			const result = await executionPersistence.findSingleExecution(executionId);
 
 			expect(result).toEqual({ id: executionId });
 			expect(executionRepository.findSingleExecution).toHaveBeenCalledWith(executionId, undefined);
@@ -780,7 +780,9 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(mockEntity('db'));
 			dbStore.read.mockResolvedValue(bundle);
 
-			const result = await executionPersistence.findById(executionId, { includeData: true });
+			const result = await executionPersistence.findSingleExecution(executionId, {
+				includeData: true,
+			});
 
 			expect(executionRepository.findOne).toHaveBeenCalledWith({
 				where: { id: executionId },
@@ -803,7 +805,9 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(mockEntity('fs'));
 			fsStore.read.mockResolvedValue(bundle);
 
-			const result = await executionPersistence.findById(executionId, { includeData: true });
+			const result = await executionPersistence.findSingleExecution(executionId, {
+				includeData: true,
+			});
 
 			expect(fsStore.read).toHaveBeenCalledWith({ workflowId, executionId });
 			expect(dbStore.read).not.toHaveBeenCalled();
@@ -818,7 +822,7 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(mockEntity('db'));
 			dbStore.read.mockResolvedValue(bundle);
 
-			const result = await executionPersistence.findById(executionId, {
+			const result = await executionPersistence.findSingleExecution(executionId, {
 				includeData: true,
 				unflattenData: true,
 			});
@@ -832,7 +836,7 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(mockEntity('db'));
 			dbStore.read.mockResolvedValue(bundle);
 
-			await executionPersistence.findById(executionId, {
+			await executionPersistence.findSingleExecution(executionId, {
 				includeData: true,
 				includeAnnotation: true,
 			});
@@ -847,7 +851,9 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('db');
 			executionRepository.findOne.mockResolvedValue(null);
 
-			const result = await executionPersistence.findById(executionId, { includeData: true });
+			const result = await executionPersistence.findSingleExecution(executionId, {
+				includeData: true,
+			});
 
 			expect(result).toBeUndefined();
 			expect(dbStore.read).not.toHaveBeenCalled();
@@ -860,7 +866,9 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(entity);
 			dbStore.read.mockResolvedValue(null);
 
-			const result = await executionPersistence.findById(executionId, { includeData: true });
+			const result = await executionPersistence.findSingleExecution(executionId, {
+				includeData: true,
+			});
 
 			expect(result).toBeUndefined();
 			expect(executionRepository.reportInvalidExecutions).toHaveBeenCalledWith([entity]);
@@ -872,7 +880,7 @@ describe('ExecutionPersistence', () => {
 			fsStore.read.mockResolvedValue(null);
 
 			await expect(
-				executionPersistence.findById(executionId, { includeData: true }),
+				executionPersistence.findSingleExecution(executionId, { includeData: true }),
 			).rejects.toBeInstanceOf(MissingExecutionDataError);
 			expect(executionRepository.reportInvalidExecutions).not.toHaveBeenCalled();
 		});
@@ -882,7 +890,7 @@ describe('ExecutionPersistence', () => {
 			executionRepository.findOne.mockResolvedValue(mockEntity('db'));
 			dbStore.read.mockResolvedValue(bundle);
 
-			await executionPersistence.findById(executionId, {
+			await executionPersistence.findSingleExecution(executionId, {
 				includeData: true,
 				where: { status: 'success' },
 			});
@@ -894,7 +902,7 @@ describe('ExecutionPersistence', () => {
 		});
 	});
 
-	describe('findMany', () => {
+	describe('findMultipleExecutions', () => {
 		const wf = 'wf-1';
 
 		const makeBundle = (id: string) => ({
@@ -926,7 +934,7 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('fs');
 			executionRepository.findMultipleExecutions.mockResolvedValue([]);
 
-			await executionPersistence.findMany({ where: { workflowId: wf } });
+			await executionPersistence.findMultipleExecutions({ where: { workflowId: wf } });
 
 			expect(executionRepository.findMultipleExecutions).toHaveBeenCalledWith(
 				{ where: { workflowId: wf } },
@@ -946,7 +954,7 @@ describe('ExecutionPersistence', () => {
 				]),
 			);
 
-			const result = await executionPersistence.findMany(
+			const result = await executionPersistence.findMultipleExecutions(
 				{ where: { workflowId: wf } },
 				{ includeData: true },
 			);
@@ -975,7 +983,7 @@ describe('ExecutionPersistence', () => {
 			);
 			fsStore.readMany.mockResolvedValue(new Map([['b', makeBundle('b')]]));
 
-			const result = await executionPersistence.findMany({}, { includeData: true });
+			const result = await executionPersistence.findMultipleExecutions({}, { includeData: true });
 
 			expect(dbStore.readMany).toHaveBeenCalledWith([
 				{ workflowId: wf, executionId: 'a' },
@@ -994,7 +1002,7 @@ describe('ExecutionPersistence', () => {
 			dbStore.readMany.mockResolvedValue(new Map([['a', makeBundle('a')]]));
 			fsStore.readMany.mockResolvedValue(new Map());
 
-			const result = await executionPersistence.findMany({}, { includeData: true });
+			const result = await executionPersistence.findMultipleExecutions({}, { includeData: true });
 
 			expect(executionRepository.reportInvalidExecutions).toHaveBeenCalledWith([dbB, fsC]);
 			expect(result.map((e) => e.id)).toEqual(['a']);
@@ -1004,7 +1012,7 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('db');
 			executionRepository.find.mockResolvedValue([]);
 
-			await executionPersistence.findMany(
+			await executionPersistence.findMultipleExecutions(
 				{ where: { workflowId: wf }, take: 5 },
 				{ includeData: true },
 			);
@@ -1019,7 +1027,10 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('db');
 			executionRepository.find.mockResolvedValue([]);
 
-			await executionPersistence.findMany({ relations: ['annotation'] }, { includeData: true });
+			await executionPersistence.findMultipleExecutions(
+				{ relations: ['annotation'] },
+				{ includeData: true },
+			);
 
 			const findArg = executionRepository.find.mock.calls[0][0];
 			expect(findArg?.relations).toEqual(['annotation', 'metadata']);
@@ -1029,7 +1040,7 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('db');
 			executionRepository.find.mockResolvedValue([]);
 
-			await executionPersistence.findMany(
+			await executionPersistence.findMultipleExecutions(
 				{ relations: { annotation: true } },
 				{ includeData: true },
 			);
@@ -1042,7 +1053,7 @@ describe('ExecutionPersistence', () => {
 			const executionPersistence = createPersistenceService('db');
 			executionRepository.find.mockResolvedValue([]);
 
-			const result = await executionPersistence.findMany({}, { includeData: true });
+			const result = await executionPersistence.findMultipleExecutions({}, { includeData: true });
 
 			expect(result).toEqual([]);
 			expect(dbStore.readMany).not.toHaveBeenCalled();

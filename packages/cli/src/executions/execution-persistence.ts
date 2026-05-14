@@ -247,7 +247,7 @@ export class ExecutionPersistence {
 	 * - In `db` mode, we load entity, metadata, optional annotation, and data via `DbStore`.
 	 * - In `fs` mode, we load entity, metadata, optional annotation from the DB, and data via `FsStore`.
 	 */
-	async findById(
+	async findSingleExecution(
 		id: string,
 		options?: {
 			includeData: true;
@@ -256,7 +256,7 @@ export class ExecutionPersistence {
 			where?: FindOptionsWhere<ExecutionEntity>;
 		},
 	): Promise<IExecutionResponse | undefined>;
-	async findById(
+	async findSingleExecution(
 		id: string,
 		options?: {
 			includeData: true;
@@ -265,7 +265,7 @@ export class ExecutionPersistence {
 			where?: FindOptionsWhere<ExecutionEntity>;
 		},
 	): Promise<IExecutionFlattedDb | undefined>;
-	async findById(
+	async findSingleExecution(
 		id: string,
 		options?: {
 			includeData?: boolean;
@@ -274,7 +274,7 @@ export class ExecutionPersistence {
 			where?: FindOptionsWhere<ExecutionEntity>;
 		},
 	): Promise<IExecutionBase | undefined>;
-	async findById(
+	async findSingleExecution(
 		id: string,
 		options?: {
 			includeData?: boolean;
@@ -297,7 +297,7 @@ export class ExecutionPersistence {
 
 		if (!entity) return undefined;
 
-		const store = entity.storedAt === 'db' ? this.dbStore : this.fsStore;
+		const store = this.getStoreFor(entity.storedAt);
 		const bundle = await store.read({ workflowId: entity.workflowId, executionId: entity.id });
 
 		if (!bundle) {
@@ -323,28 +323,28 @@ export class ExecutionPersistence {
 	 * - In `db` mode, we issue one `In(ids)` query against `execution_data` per batch.
 	 * - In `fs` mode, we fan out reads across the filesystem.
 	 */
-	async findMany(
+	async findMultipleExecutions(
 		queryParams: FindManyOptions<ExecutionEntity>,
 		options?: {
 			unflattenData: true;
 			includeData?: true;
 		},
 	): Promise<IExecutionResponse[]>;
-	async findMany(
+	async findMultipleExecutions(
 		queryParams: FindManyOptions<ExecutionEntity>,
 		options?: {
 			unflattenData?: false | undefined;
 			includeData?: true;
 		},
 	): Promise<IExecutionFlattedDb[]>;
-	async findMany(
+	async findMultipleExecutions(
 		queryParams: FindManyOptions<ExecutionEntity>,
 		options?: {
 			unflattenData?: boolean;
 			includeData?: boolean;
 		},
 	): Promise<IExecutionBase[]>;
-	async findMany(
+	async findMultipleExecutions(
 		queryParams: FindManyOptions<ExecutionEntity>,
 		options?: {
 			unflattenData?: boolean;
@@ -378,7 +378,7 @@ export class ExecutionPersistence {
 
 		// Report-and-drop matches the ExecutionRepository's existing behavior for
 		// `findMultipleExecutions`: one missing bundle should not fail the whole
-		// list. This asymmetry vs `findById` (which throws on a missing fs bundle)
+		// list. This asymmetry vs `findSingleExecution` (which throws on a missing fs bundle)
 		// is intentional — single-fetch callers want loud failure on integrity
 		// loss; list-fetch callers want resilience.
 		const invalidEntities = [

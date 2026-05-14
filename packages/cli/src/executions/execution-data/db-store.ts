@@ -34,12 +34,11 @@ export class DbStore implements ExecutionDataStore {
 		return { ...result, version: EXECUTION_DATA_BUNDLE_VERSION };
 	}
 
-	async readMany(refs: ExecutionRef[], tx?: EntityManager) {
+	async readMany(refs: ExecutionRef[]) {
 		const bundles = new Map<string, ExecutionDataBundle>();
 		if (refs.length === 0) return bundles;
 
-		const repo = tx ? tx.getRepository(ExecutionData) : this.repository;
-		const rows = await repo.find({
+		const rows = await this.repository.find({
 			where: { executionId: In(refs.map((r) => r.executionId)) },
 			select: ['executionId', 'data', 'workflowData', 'workflowVersionId'],
 		});

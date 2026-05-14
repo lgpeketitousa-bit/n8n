@@ -35,6 +35,6 @@ export interface ExecutionDataStore {
 	write(ref: ExecutionRef, payload: ExecutionDataPayload, tx?: EntityManager): Promise<void>;
 	read(ref: ExecutionRef, tx?: EntityManager): Promise<ExecutionDataBundle | null>;
 	/** Read multiple bundles by ref. Returns a map keyed by `executionId`; missing entries are omitted. */
-	readMany(refs: ExecutionRef[], tx?: EntityManager): Promise<Map<string, ExecutionDataBundle>>;
+	readMany(refs: ExecutionRef[]): Promise<Map<string, ExecutionDataBundle>>;
 	delete(ref: ExecutionRef | ExecutionRef[]): Promise<void>;
 }
