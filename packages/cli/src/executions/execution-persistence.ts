@@ -1,22 +1,34 @@
+import { parseFlatted } from '@n8n/backend-common';
 import { DatabaseConfig, ExecutionsConfig } from '@n8n/config';
 import { Time } from '@n8n/constants';
 import type {
 	CreateExecutionPayload,
 	ExecutionDataStorageLocation,
 	ExecutionDeletionCriteria,
+	FindManyOptions,
 	FindOptionsWhere,
+	IExecutionBase,
+	IExecutionFlattedDb,
 	IExecutionResponse,
 	UpdateExecutionConditions,
 } from '@n8n/db';
-import { ExecutionEntity, ExecutionRepository, Not } from '@n8n/db';
+import { ExecutionEntity, ExecutionRepository, Not, separate } from '@n8n/db';
 import { Service } from '@n8n/di';
 import { stringify } from 'flatted';
+import pick from 'lodash/pick';
 import { BinaryDataService, StorageConfig } from 'n8n-core';
+import type { IRunExecutionData, IRunExecutionDataAll } from 'n8n-workflow';
+import { migrateRunExecutionData } from 'n8n-workflow';
 
 import { DbStore } from './execution-data/db-store';
 import { FsStore } from './execution-data/fs-store';
 import { MissingExecutionDataError } from './execution-data/missing-execution-data.error';
-import type { ExecutionDataStore, ExecutionRef, WorkflowSnapshot } from './execution-data/types';
+import type {
+	ExecutionDataBundle,
+	ExecutionDataStore,
+	ExecutionRef,
+	WorkflowSnapshot,
+} from './execution-data/types';
 import { DuplicateExecutionError } from '../errors/duplicate-execution.error';
 
 type DeletionTarget = ExecutionRef & { storedAt: ExecutionDataStorageLocation };
@@ -227,8 +239,210 @@ export class ExecutionPersistence {
 	private toWorkflowSnapshot(
 		workflowData: NonNullable<IExecutionResponse['workflowData']>,
 	): WorkflowSnapshot {
-		const { id, name, nodes, connections, settings } = workflowData;
-		return { id, name, nodes, connections, settings };
+		return pick(workflowData, ['id', 'name', 'nodes', 'connections', 'settings']);
+	}
+
+	/**
+	 * Find a single execution by id, dispatching data reads to the store matching its `storedAt`.
+	 * - In `db` mode, we load entity, metadata, optional annotation, and data via `DbStore`.
+	 * - In `fs` mode, we load entity, metadata, optional annotation from the DB, and data via `FsStore`.
+	 */
+	async findById(
+		id: string,
+		options?: {
+			includeData: true;
+			includeAnnotation?: boolean;
+			unflattenData: true;
+			where?: FindOptionsWhere<ExecutionEntity>;
+		},
+	): Promise<IExecutionResponse | undefined>;
+	async findById(
+		id: string,
+		options?: {
+			includeData: true;
+			includeAnnotation?: boolean;
+			unflattenData?: false | undefined;
+			where?: FindOptionsWhere<ExecutionEntity>;
+		},
+	): Promise<IExecutionFlattedDb | undefined>;
+	async findById(
+		id: string,
+		options?: {
+			includeData?: boolean;
+			includeAnnotation?: boolean;
+			unflattenData?: boolean;
+			where?: FindOptionsWhere<ExecutionEntity>;
+		},
+	): Promise<IExecutionBase | undefined>;
+	async findById(
+		id: string,
+		options?: {
+			includeData?: boolean;
+			includeAnnotation?: boolean;
+			unflattenData?: boolean;
+			where?: FindOptionsWhere<ExecutionEntity>;
+		},
+	): Promise<IExecutionFlattedDb | IExecutionResponse | IExecutionBase | undefined> {
+		if (!options?.includeData) {
+			return await this.executionRepository.findSingleExecution(id, options);
+		}
+
+		const entity = await this.executionRepository.findOne({
+			where: { id, ...options.where },
+			relations: {
+				metadata: true,
+				...(options.includeAnnotation ? { annotation: { tags: true } } : {}),
+			},
+		});
+
+		if (!entity) return undefined;
+
+		const store = entity.storedAt === 'db' ? this.dbStore : this.fsStore;
+		const bundle = await store.read({ workflowId: entity.workflowId, executionId: entity.id });
+
+		if (!bundle) {
+			if (entity.storedAt === 'db') {
+				this.executionRepository.reportInvalidExecutions([entity]);
+				return undefined;
+			}
+			throw new MissingExecutionDataError({
+				workflowId: entity.workflowId,
+				executionId: entity.id,
+			});
+		}
+
+		return (await this.assembleExecution(entity, bundle, options)) as
+			| IExecutionFlattedDb
+			| IExecutionResponse
+			| IExecutionBase;
+	}
+
+	/**
+	 * Find multiple executions matching `queryParams`. With `includeData: true`, partitions
+	 * entities by `storedAt` and batch-fetches bundles from each store to avoid n+1 reads.
+	 * - In `db` mode, we issue one `In(ids)` query against `execution_data` per batch.
+	 * - In `fs` mode, we fan out reads across the filesystem.
+	 */
+	async findMany(
+		queryParams: FindManyOptions<ExecutionEntity>,
+		options?: {
+			unflattenData: true;
+			includeData?: true;
+		},
+	): Promise<IExecutionResponse[]>;
+	async findMany(
+		queryParams: FindManyOptions<ExecutionEntity>,
+		options?: {
+			unflattenData?: false | undefined;
+			includeData?: true;
+		},
+	): Promise<IExecutionFlattedDb[]>;
+	async findMany(
+		queryParams: FindManyOptions<ExecutionEntity>,
+		options?: {
+			unflattenData?: boolean;
+			includeData?: boolean;
+		},
+	): Promise<IExecutionBase[]>;
+	async findMany(
+		queryParams: FindManyOptions<ExecutionEntity>,
+		options?: {
+			unflattenData?: boolean;
+			includeData?: boolean;
+		},
+	): Promise<IExecutionFlattedDb[] | IExecutionResponse[] | IExecutionBase[]> {
+		if (!options?.includeData) {
+			return await this.executionRepository.findMultipleExecutions(queryParams, options);
+		}
+
+		queryParams.relations ??= [];
+		if (Array.isArray(queryParams.relations)) {
+			queryParams.relations.push('metadata');
+		} else {
+			queryParams.relations.metadata = true;
+		}
+
+		const entities = await this.executionRepository.find(queryParams);
+		if (entities.length === 0) return [];
+
+		const [dbEntities, fsEntities] = separate(entities, (e) => e.storedAt === 'db');
+
+		const [dbBundles, fsBundles] = await Promise.all([
+			this.dbStore.readMany(
+				dbEntities.map((e) => ({ workflowId: e.workflowId, executionId: e.id })),
+			),
+			this.fsStore.readMany(
+				fsEntities.map((e) => ({ workflowId: e.workflowId, executionId: e.id })),
+			),
+		]);
+
+		// Report-and-drop matches the ExecutionRepository's existing behavior for
+		// `findMultipleExecutions`: one missing bundle should not fail the whole
+		// list. This asymmetry vs `findById` (which throws on a missing fs bundle)
+		// is intentional — single-fetch callers want loud failure on integrity
+		// loss; list-fetch callers want resilience.
+		const invalidEntities = [
+			...dbEntities.filter((e) => !dbBundles.has(e.id)),
+			...fsEntities.filter((e) => !fsBundles.has(e.id)),
+		];
+		if (invalidEntities.length > 0) {
+			this.executionRepository.reportInvalidExecutions(invalidEntities);
+		}
+
+		const assembled = await Promise.all(
+			entities.map(async (entity) => {
+				const bundle = (entity.storedAt === 'db' ? dbBundles : fsBundles).get(entity.id);
+				if (!bundle) return null;
+				return await this.assembleExecution(entity, bundle, options);
+			}),
+		);
+
+		return assembled.filter((e): e is NonNullable<typeof e> => e !== null) as
+			| IExecutionFlattedDb[]
+			| IExecutionResponse[]
+			| IExecutionBase[];
+	}
+
+	private async assembleExecution(
+		entity: ExecutionEntity,
+		bundle: ExecutionDataBundle,
+		options: { unflattenData?: boolean; includeAnnotation?: boolean },
+	) {
+		const { executionData: _ed, metadata, annotation, ...rest } = entity;
+		const data = await this.parseExecutionData(bundle.data, options);
+		const serializedAnnotation = this.serializeAnnotation(annotation);
+
+		return {
+			...rest,
+			data,
+			workflowData: bundle.workflowData,
+			workflowVersionId: bundle.workflowVersionId ?? null,
+			customData: Object.fromEntries(metadata.map((m) => [m.key, m.value])),
+			...(options.includeAnnotation && serializedAnnotation
+				? { annotation: serializedAnnotation }
+				: {}),
+		};
+	}
+
+	private async parseExecutionData(
+		data: string,
+		options: { unflattenData?: boolean },
+	): Promise<IRunExecutionData | string | undefined> {
+		if (!options.unflattenData) return data;
+
+		const deserialized: unknown = await parseFlatted(data);
+		if (!deserialized) return undefined;
+		return migrateRunExecutionData(deserialized as IRunExecutionDataAll);
+	}
+
+	private serializeAnnotation(annotation: ExecutionEntity['annotation']) {
+		if (!annotation) return null;
+		const { id, vote, tags } = annotation;
+		return {
+			id,
+			vote,
+			tags: tags?.map((tag) => pick(tag, ['id', 'name'])) ?? [],
+		};
 	}
 
 	/**
