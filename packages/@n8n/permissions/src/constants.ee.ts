@@ -38,6 +38,7 @@ export const RESOURCES = {
 		'execute',
 		'execute-chat',
 		'export',
+		'import',
 		'move',
 		'activate',
 		'deactivate',
