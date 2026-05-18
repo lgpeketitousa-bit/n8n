@@ -21,4 +21,28 @@ export class WorkflowSerializer {
 			isArchived: workflow.isArchived,
 		});
 	}
+
+	/**
+	 * Turns a workflow from a package back into something we can save on
+	 * the target instance.
+	 *
+	 * We drop anything the target owns — its id, versionId, where it lives,
+	 * whether it's active, timestamps — so the caller can set those fresh.
+	 * The content of the workflow comes along, and we keep whichever
+	 * archived state the source had it in.
+	 */
+	deserialize(wire: SerializedWorkflow): Partial<WorkflowEntity> {
+		const partial: Partial<WorkflowEntity> = {
+			name: wire.name,
+			nodes: wire.nodes,
+			connections: wire.connections,
+			isArchived: wire.isArchived,
+		};
+
+		if (wire.settings !== undefined) {
+			partial.settings = wire.settings;
+		}
+
+		return partial;
+	}
 }
