@@ -79,7 +79,7 @@ export class ImportPipeline {
 			},
 			workflows: workflows.map((w) => ({
 				sourceId: w.sourceWorkflowId ?? '',
-				workflowId: w.id,
+				localId: w.id,
 				name: w.name,
 				projectId: target.projectId,
 				parentFolderId: w.parentFolder?.id ?? null,
