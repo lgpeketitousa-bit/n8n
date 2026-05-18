@@ -14,7 +14,7 @@ export interface ImportPackageRequest {
 
 export interface ImportedWorkflowSummary {
 	sourceId: string;
-	localId: string;
+	workflowId: string;
 	name: string;
 	projectId: string;
 	parentFolderId: string | null;

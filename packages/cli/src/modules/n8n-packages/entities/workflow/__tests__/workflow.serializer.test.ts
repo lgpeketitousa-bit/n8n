@@ -1,5 +1,3 @@
-import type { WorkflowEntity } from '@n8n/db';
-
 import type { SerializedWorkflow } from '../../../spec/serialized/workflow.schema';
 import { WorkflowSerializer } from '../workflow.serializer';
 
@@ -65,9 +63,8 @@ describe('WorkflowSerializer.deserialize', () => {
 	});
 
 	it('does not carry id, versionId, parentFolderId, or active from the wire', () => {
-		const result = serializer.deserialize(wire());
+		const partial = serializer.deserialize(wire());
 
-		const partial = result as Partial<WorkflowEntity>;
 		expect(partial.id).toBeUndefined();
 		expect(partial.versionId).toBeUndefined();
 		expect(partial.parentFolder).toBeUndefined();
