@@ -73,7 +73,7 @@ post:
                     - name
                     - projectId
                     - parentFolderId
-                    - active
+                    - activeVersionId
                   properties:
                     sourceId:
                       type: string
@@ -88,8 +88,9 @@ post:
                     parentFolderId:
                       type: string
                       nullable: true
-                    active:
-                      type: boolean
+                    activeVersionId:
+                      type: string
+                      nullable: true
     '400':
       $ref: '../../../../shared/spec/responses/badRequest.yml'
     '401':

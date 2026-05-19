@@ -17,7 +17,7 @@ const wire = (overrides: Partial<SerializedWorkflow> = {}): SerializedWorkflow =
 	connections: {},
 	versionId: 'version-from-source',
 	parentFolderId: 'folder-from-source',
-	active: true,
+	activeVersionId: 'published-version-from-source',
 	isArchived: false,
 	...overrides,
 });
@@ -62,12 +62,12 @@ describe('WorkflowSerializer.deserialize', () => {
 		expect(result.settings).toBeUndefined();
 	});
 
-	it('does not carry id, versionId, parentFolderId, or active from the wire', () => {
+	it('does not carry id, versionId, parentFolderId, or activeVersionId from the wire', () => {
 		const partial = serializer.deserialize(wire());
 
 		expect(partial.id).toBeUndefined();
 		expect(partial.versionId).toBeUndefined();
 		expect(partial.parentFolder).toBeUndefined();
-		expect(partial.active).toBeUndefined();
+		expect(partial.activeVersionId).toBeUndefined();
 	});
 });

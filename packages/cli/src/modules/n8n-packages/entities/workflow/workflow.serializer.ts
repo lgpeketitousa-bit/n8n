@@ -17,7 +17,7 @@ export class WorkflowSerializer {
 			settings: workflow.settings,
 			versionId: workflow.versionId,
 			parentFolderId: workflow.parentFolder?.id ?? null,
-			active: workflow.activeVersionId === workflow.versionId,
+			activeVersionId: workflow.activeVersionId ?? null,
 			isArchived: workflow.isArchived,
 		});
 	}
@@ -27,7 +27,7 @@ export class WorkflowSerializer {
 	 * the target instance.
 	 *
 	 * We drop anything the target owns — its id, versionId, where it lives,
-	 * whether it's active, timestamps — so the caller can set those fresh.
+	 * activation state, timestamps — so the caller can set those fresh.
 	 * The content of the workflow comes along, and we keep whichever
 	 * archived state the source had it in.
 	 */

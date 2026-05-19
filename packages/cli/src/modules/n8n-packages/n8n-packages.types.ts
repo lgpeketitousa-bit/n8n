@@ -18,7 +18,7 @@ export interface ImportedWorkflowSummary {
 	name: string;
 	projectId: string;
 	parentFolderId: string | null;
-	active: boolean;
+	activeVersionId: string | null;
 }
 
 export interface ImportResult {

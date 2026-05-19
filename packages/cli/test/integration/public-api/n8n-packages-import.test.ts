@@ -72,7 +72,7 @@ async function buildImportPackage(): Promise<Buffer> {
 			connections: {},
 			versionId: 'wire-version-id',
 			parentFolderId: null,
-			active: false,
+			activeVersionId: null,
 			isArchived: false,
 		}),
 	);
@@ -124,7 +124,7 @@ describe('POST /n8n-packages/import', () => {
 					name: 'HTTP Imported',
 					projectId: ownerPersonalProject.id,
 					parentFolderId: null,
-					active: false,
+					activeVersionId: null,
 				},
 			],
 		});

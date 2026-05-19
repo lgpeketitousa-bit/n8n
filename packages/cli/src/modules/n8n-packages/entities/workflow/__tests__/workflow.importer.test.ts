@@ -36,7 +36,7 @@ const buildSerializedWorkflow = (
 	connections: {},
 	versionId: 'source-version-id',
 	parentFolderId: null,
-	active: true,
+	activeVersionId: null,
 	isArchived: false,
 	...overrides,
 });
@@ -114,8 +114,8 @@ describe('WorkflowImporter.import', () => {
 		expect(result[0].name).toBe('My Workflow');
 	});
 
-	it('resets activeVersionId to null even when the wire marks the workflow active', async () => {
-		const wire = buildSerializedWorkflow({ active: true });
+	it('resets activeVersionId to null even when the wire has a published version', async () => {
+		const wire = buildSerializedWorkflow({ activeVersionId: 'source-published-version-id' });
 		const manifest: PackageManifest = {
 			packageFormatVersion: '1',
 			exportedAt: '2026-05-18T12:00:00.000Z',
@@ -128,7 +128,6 @@ describe('WorkflowImporter.import', () => {
 		const result = await importer.import(buildContext(manifest, reader, manager));
 
 		expect(result[0].activeVersionId).toBe(null);
-		expect(result[0].active).toBe(false);
 	});
 
 	it('assigns a fresh versionId distinct from the wire versionId', async () => {

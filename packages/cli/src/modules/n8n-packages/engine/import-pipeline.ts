@@ -83,7 +83,7 @@ export class ImportPipeline {
 				name: w.name,
 				projectId: target.projectId,
 				parentFolderId: w.parentFolder?.id ?? null,
-				active: w.active,
+				activeVersionId: w.activeVersionId ?? null,
 			})),
 		};
 	}

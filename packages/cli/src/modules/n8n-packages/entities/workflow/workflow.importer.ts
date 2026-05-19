@@ -48,7 +48,6 @@ export class WorkflowImporter implements EntityImporter<WorkflowEntity> {
 
 			const workflow = Object.assign(new WorkflowEntity(), partial);
 			workflow.versionId = uuid();
-			workflow.active = false;
 			workflow.activeVersionId = null;
 			workflow.sourceWorkflowId = entry.id;
 			workflow.parentFolder = target.folderId ? ({ id: target.folderId } as Folder) : null;

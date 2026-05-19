@@ -38,7 +38,7 @@ const validWorkflow = (id: string, name: string): SerializedWorkflow => ({
 	connections: {},
 	versionId: 'wire-version-id',
 	parentFolderId: null,
-	active: false,
+	activeVersionId: null,
 	isArchived: false,
 });
 
@@ -67,7 +67,7 @@ const brokenWorkflow = (id: string, name: string): SerializedWorkflow => ({
 	},
 	versionId: 'wire-version-id',
 	parentFolderId: null,
-	active: false,
+	activeVersionId: null,
 	isArchived: false,
 });
 
