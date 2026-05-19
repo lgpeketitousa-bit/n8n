@@ -9,7 +9,12 @@ import { ExecutionRepository, WorkflowRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
 import type { ServiceIdentifier } from '@n8n/di';
 import { ExternalSecretsProxy, WorkflowExecute } from 'n8n-core';
-import { UnexpectedError, Workflow, createRunExecutionData } from 'n8n-workflow';
+import {
+	UnexpectedError,
+	Workflow,
+	createRunExecutionData,
+	mergeRunsPerBranch,
+} from 'n8n-workflow';
 import type {
 	AiEvent,
 	IDataObject,
@@ -32,7 +37,9 @@ import type {
 	ExecuteWorkflowData,
 	ExecuteAgentData,
 	RelatedExecution,
+	IRun,
 	IRunExecutionData,
+	SubWorkflowReturnMode,
 } from 'n8n-workflow';
 
 import { ActiveExecutions } from '@/active-executions';
@@ -313,6 +320,47 @@ async function listAgents(userId: string): Promise<Array<{ id: string; name: str
 	return agents.map((agent) => ({ id: agent.id, name: agent.name }));
 }
 
+/**
+ * Resolves the return contract declared by a sub-workflow's `Execute Workflow Trigger`.
+ * Falls back to `lastRunOnly` (historical behavior) when the sub-workflow has no such trigger, or when the trigger is pre-1.2.
+ * From v1.2, the trigger declares its preference via the `returnOutput` parameter (default `allRuns`).
+ * See n8n-io/n8n#9989.
+ */
+export function getSubWorkflowReturnMode(
+	nodes: INode[],
+): Exclude<SubWorkflowReturnMode, 'fromSubWorkflow'> {
+	const trigger = nodes.find((node) => node.type === 'n8n-nodes-base.executeWorkflowTrigger');
+	if (!trigger || (trigger.typeVersion ?? 1) < 1.2) {
+		return 'lastRunOnly';
+	}
+	const declared = trigger.parameters?.returnOutput;
+	return declared === 'lastRunOnly' ? 'lastRunOnly' : 'allRuns';
+}
+
+/**
+ * Returns the items the parent workflow gets back from the sub-workflow's last node.
+ * Pinned data on the last node always wins in manual mode.
+ */
+export function buildSubWorkflowOutput(
+	data: IRun,
+	workflowNodes: INode[],
+	requestedMode: SubWorkflowReturnMode,
+): Array<INodeExecutionData[] | null> {
+	const effectiveMode =
+		requestedMode === 'fromSubWorkflow' ? getSubWorkflowReturnMode(workflowNodes) : requestedMode;
+	const runs = WorkflowHelpers.getLastExecutedNodeRuns(data);
+	const { lastNodeExecuted, pinData = {} } = data.data.resultData;
+	const manualPinDataOverride =
+		data.mode === 'manual' &&
+		lastNodeExecuted !== undefined &&
+		pinData[lastNodeExecuted] !== undefined;
+
+	if (effectiveMode === 'allRuns' && runs.length > 0 && !manualPinDataOverride) {
+		return mergeRunsPerBranch(runs);
+	}
+	return WorkflowHelpers.getLastExecutedNodeData(data)?.data?.main ?? [null];
+}
+
 async function startExecution(
 	additionalData: IWorkflowExecuteAdditionalData,
 	options: ExecuteWorkflowOptions,
@@ -459,10 +507,14 @@ async function startExecution(
 		// Workflow did finish successfully
 
 		activeExecutions.finalizeExecution(executionId, data);
-		const returnData = WorkflowHelpers.getDataLastExecutedNodeData(data);
+
 		return {
 			executionId,
-			data: returnData!.data!.main,
+			data: buildSubWorkflowOutput(
+				data,
+				workflowData.nodes,
+				options.returnMode ?? 'fromSubWorkflow',
+			),
 			waitTill: data.waitTill,
 		};
 	}

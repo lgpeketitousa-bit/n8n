@@ -13,6 +13,7 @@ import type {
 	IRun,
 	INodeExecutionData,
 	INode,
+	ITaskData,
 } from 'n8n-workflow';
 import { createRunExecutionData } from 'n8n-workflow';
 import type PCancelable from 'p-cancelable';
@@ -33,12 +34,14 @@ import { UrlService } from '@/services/url.service';
 import { WorkflowStatisticsService } from '@/services/workflow-statistics.service';
 import { Telemetry } from '@/telemetry';
 import {
+	buildSubWorkflowOutput,
 	executeAgent,
 	executeWorkflow,
 	getBase,
 	getRunData,
 	getDraftWorkflowData,
 	getPublishedWorkflowData,
+	getSubWorkflowReturnMode,
 } from '@/workflow-execute-additional-data';
 import * as WorkflowHelpers from '@/workflow-helpers';
 
@@ -209,6 +212,119 @@ describe('WorkflowExecuteAdditionalData', () => {
 				data: runWithData.data.resultData.runData[LAST_NODE_EXECUTED][0].data!.main,
 				executionId: EXECUTION_ID,
 				waitTill,
+			});
+		});
+
+		describe('returnMode resolution', () => {
+			// Terminal node ran twice:
+			// - first: {itemId: 0}
+			// - then: {itemId: 1} + {itemId: 2}
+			// Canonical "multi-run terminal node" scenario from n8n-io/n8n#9989.
+			const terminalNodeWithTwoRuns = {
+				data: {
+					resultData: {
+						runData: {
+							[LAST_NODE_EXECUTED]: [
+								{ data: { main: [[{ json: { itemId: 0 } }]] } },
+								{ data: { main: [[{ json: { itemId: 1 } }, { json: { itemId: 2 } }]] } },
+							],
+						},
+						lastNodeExecuted: LAST_NODE_EXECUTED,
+					},
+				},
+				finished: true,
+			} as unknown as IRun;
+
+			beforeEach(() => {
+				processRunExecutionData.mockReturnValue(getCancelablePromise(terminalNodeWithTwoRuns));
+			});
+
+			it('merges every run when the caller asks for `allRuns`', async () => {
+				const executionResponse = await executeWorkflow(
+					mock<IExecuteWorkflowInfo>(),
+					mock<IWorkflowExecuteAdditionalData>(),
+					mock<ExecuteWorkflowOptions>({
+						loadedWorkflowData: undefined,
+						doNotWaitToFinish: false,
+						returnMode: 'allRuns',
+					}),
+				);
+
+				const expectedItemsFromBothRunsConcatenated = [
+					[{ json: { itemId: 0 } }, { json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(executionResponse.data).toEqual(expectedItemsFromBothRunsConcatenated);
+			});
+
+			it('trims to the final run when the caller asks for `lastRunOnly`', async () => {
+				const executionResponse = await executeWorkflow(
+					mock<IExecuteWorkflowInfo>(),
+					mock<IWorkflowExecuteAdditionalData>(),
+					mock<ExecuteWorkflowOptions>({
+						loadedWorkflowData: undefined,
+						doNotWaitToFinish: false,
+						returnMode: 'lastRunOnly',
+					}),
+				);
+
+				const expectedItemsFromTheFinalRunOnly = [
+					[{ json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(executionResponse.data).toEqual(expectedItemsFromTheFinalRunOnly);
+			});
+
+			it('defaults to `lastRunOnly` when caller omits `returnMode` and trigger is pre-1.2', async () => {
+				const executionResponse = await executeWorkflow(
+					mock<IExecuteWorkflowInfo>(), // `nodes: []` on the mocked workflow -> no trigger -> resolves to `lastRunOnly`.
+					mock<IWorkflowExecuteAdditionalData>(),
+					mock<ExecuteWorkflowOptions>({
+						loadedWorkflowData: undefined,
+						doNotWaitToFinish: false,
+					}),
+				);
+
+				const expectedItemsFromTheFinalRunOnly = [
+					[{ json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(executionResponse.data).toEqual(expectedItemsFromTheFinalRunOnly);
+			});
+
+			it('substitutes manual-mode pinData on the terminal node regardless of `returnMode`', async () => {
+				const terminalNodeWithRunsAndPinData = {
+					mode: 'manual',
+					data: {
+						resultData: {
+							runData: {
+								[LAST_NODE_EXECUTED]: [
+									{ data: { main: [[{ json: { itemId: 0 } }]] } },
+									{ data: { main: [[{ json: { itemId: 1 } }, { json: { itemId: 2 } }]] } },
+								],
+							},
+							pinData: {
+								[LAST_NODE_EXECUTED]: [{ pinned: true }],
+							},
+							lastNodeExecuted: LAST_NODE_EXECUTED,
+						},
+					},
+					finished: true,
+				} as unknown as IRun;
+
+				processRunExecutionData.mockReturnValue(
+					getCancelablePromise(terminalNodeWithRunsAndPinData),
+				);
+
+				const executionResponse = await executeWorkflow(
+					mock<IExecuteWorkflowInfo>(),
+					mock<IWorkflowExecuteAdditionalData>(),
+					mock<ExecuteWorkflowOptions>({
+						loadedWorkflowData: undefined,
+						doNotWaitToFinish: false,
+						returnMode: 'allRuns',
+					}),
+				);
+
+				const expectedPinnedItems = [[{ json: { pinned: true }, pairedItem: { item: 0 } }]];
+				expect(executionResponse.data).toEqual(expectedPinnedItems);
 			});
 		});
 
@@ -855,6 +971,162 @@ describe('WorkflowExecuteAdditionalData', () => {
 				executeAgent(AGENT_ID, MESSAGE, EXEC_ID, THREAD_ID, additionalData),
 			).rejects.toThrow('Cannot execute agent without a userId in additional data');
 			expect(ownershipService.getWorkflowProjectCached).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('buildSubWorkflowOutput', () => {
+		const twoRunsOnTerminalNode: Record<string, ITaskData[]> = {
+			[LAST_NODE_EXECUTED]: [
+				{ data: { main: [[{ json: { itemId: 0 } }]] } },
+				{ data: { main: [[{ json: { itemId: 1 } }, { json: { itemId: 2 } }]] } },
+			] as unknown as ITaskData[],
+		};
+
+		function buildRun(overrides: {
+			mode?: IRun['mode'];
+			runData?: Record<string, ITaskData[]>;
+			pinData?: Record<string, unknown>;
+			lastNodeExecuted?: string;
+		}): IRun {
+			return {
+				mode: overrides.mode ?? 'manual',
+				data: {
+					resultData: {
+						runData: overrides.runData ?? twoRunsOnTerminalNode,
+						pinData: overrides.pinData,
+						lastNodeExecuted:
+							overrides.lastNodeExecuted === undefined
+								? LAST_NODE_EXECUTED
+								: overrides.lastNodeExecuted,
+					},
+				},
+				finished: true,
+			} as unknown as IRun;
+		}
+
+		function trigger(typeVersion: number, returnOutput?: string): INode {
+			return mock<INode>({
+				type: 'n8n-nodes-base.executeWorkflowTrigger',
+				typeVersion,
+				parameters: returnOutput === undefined ? {} : { returnOutput },
+			});
+		}
+
+		describe('pinData substitution', () => {
+			it('ignores pinData when the sub-workflow is not running in manual mode', () => {
+				const output = buildSubWorkflowOutput(
+					buildRun({
+						mode: 'trigger',
+						pinData: { [LAST_NODE_EXECUTED]: [{ pinned: true }] },
+					}),
+					[],
+					'allRuns',
+				);
+
+				const expectedItemsFromBothRunsConcatenated = [
+					[{ json: { itemId: 0 } }, { json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(output).toEqual(expectedItemsFromBothRunsConcatenated);
+			});
+
+			it('substitutes pinData when manual mode, even on the `allRuns` path', () => {
+				const output = buildSubWorkflowOutput(
+					buildRun({
+						mode: 'manual',
+						pinData: { [LAST_NODE_EXECUTED]: [{ pinned: true }] },
+					}),
+					[],
+					'allRuns',
+				);
+
+				const expectedPinnedItems = [[{ json: { pinned: true }, pairedItem: { item: 0 } }]];
+				expect(output).toEqual(expectedPinnedItems);
+			});
+		});
+
+		describe('`fromSubWorkflow` deferral to the trigger', () => {
+			it('resolves to `allRuns` when the v1.2 trigger declares `allRuns`', () => {
+				const output = buildSubWorkflowOutput(
+					buildRun({ mode: 'trigger' }),
+					[trigger(1.2, 'allRuns')],
+					'fromSubWorkflow',
+				);
+
+				const expectedItemsFromBothRunsConcatenated = [
+					[{ json: { itemId: 0 } }, { json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(output).toEqual(expectedItemsFromBothRunsConcatenated);
+			});
+
+			it('resolves to `lastRunOnly` when the v1.2 trigger declares `lastRunOnly`', () => {
+				const output = buildSubWorkflowOutput(
+					buildRun({ mode: 'trigger' }),
+					[trigger(1.2, 'lastRunOnly')],
+					'fromSubWorkflow',
+				);
+
+				const expectedItemsFromTheFinalRunOnly = [
+					[{ json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(output).toEqual(expectedItemsFromTheFinalRunOnly);
+			});
+
+			it('resolves to `lastRunOnly` for a pre-1.2 trigger', () => {
+				const output = buildSubWorkflowOutput(
+					buildRun({ mode: 'trigger' }),
+					[trigger(1.1, 'allRuns')], // legacy `returnOutput` is ignored
+					'fromSubWorkflow',
+				);
+
+				const expectedItemsFromTheFinalRunOnly = [
+					[{ json: { itemId: 1 } }, { json: { itemId: 2 } }],
+				];
+				expect(output).toEqual(expectedItemsFromTheFinalRunOnly);
+			});
+		});
+
+		it('returns `[null]` when the sub-workflow recorded no run data', () => {
+			expect(
+				buildSubWorkflowOutput(
+					buildRun({ mode: 'trigger', runData: {}, lastNodeExecuted: undefined }),
+					[],
+					'allRuns',
+				),
+			).toEqual([null]);
+		});
+	});
+
+	describe('getSubWorkflowReturnMode', () => {
+		function trigger(typeVersion: number, returnOutput?: string): INode {
+			return mock<INode>({
+				type: 'n8n-nodes-base.executeWorkflowTrigger',
+				typeVersion,
+				parameters: returnOutput === undefined ? {} : { returnOutput },
+			});
+		}
+
+		it('returns `lastRunOnly` when there is no Execute Workflow Trigger', () => {
+			expect(getSubWorkflowReturnMode([])).toBe('lastRunOnly');
+			expect(getSubWorkflowReturnMode([mock<INode>({ type: 'n8n-nodes-base.set' })])).toBe(
+				'lastRunOnly',
+			);
+		});
+
+		it('returns `lastRunOnly` for pre-1.2 triggers regardless of parameters', () => {
+			expect(getSubWorkflowReturnMode([trigger(1)])).toBe('lastRunOnly');
+			expect(getSubWorkflowReturnMode([trigger(1.1)])).toBe('lastRunOnly');
+			// Even when the (legacy) trigger carries a `returnOutput` parameter
+			// it is ignored — pre-1.2 triggers can't declare the contract.
+			expect(getSubWorkflowReturnMode([trigger(1.1, 'allRuns')])).toBe('lastRunOnly');
+		});
+
+		it('defaults a v1.2 trigger to `allRuns` when nothing is declared', () => {
+			expect(getSubWorkflowReturnMode([trigger(1.2)])).toBe('allRuns');
+		});
+
+		it("honours the trigger's explicit choice on v1.2+", () => {
+			expect(getSubWorkflowReturnMode([trigger(1.2, 'allRuns')])).toBe('allRuns');
+			expect(getSubWorkflowReturnMode([trigger(1.2, 'lastRunOnly')])).toBe('lastRunOnly');
 		});
 	});
 });

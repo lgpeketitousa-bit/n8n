@@ -1094,6 +1094,7 @@ export type IExecuteFunctions = ExecuteFunctions.GetNodeParameterFn &
 				doNotWaitToFinish?: boolean;
 				parentExecution?: RelatedExecution;
 				executionMode?: WorkflowExecuteMode;
+				returnMode?: SubWorkflowReturnMode;
 			},
 		): Promise<ExecuteWorkflowData>;
 		executeAgent(
@@ -1960,8 +1961,17 @@ export interface ITriggerResponse {
 	manualTriggerResponse?: Promise<INodeExecutionData[][]>;
 }
 
+/**
+ * How a caller wants a sub-workflow's terminal node output to be returned:
+ * - `allRuns`: every item from every run of the terminal node, concatenated per output branch. The natural choice for sub-workflows whose final node loops or batches.
+ * - `lastRunOnly`: only items from the terminal node's final run. Legacy behaviour preserved for callers that relied on it before n8n-io/n8n#9989.
+ * - `fromSubWorkflow`: defer to the contract declared by the sub-workflow's Execute Workflow Trigger. v1.2+ triggers declare their preference.
+ */
+export type SubWorkflowReturnMode = 'fromSubWorkflow' | 'lastRunOnly' | 'allRuns';
+
 export interface ExecuteWorkflowData {
 	executionId: string;
+	/** Terminal node output, shaped per the caller's requested `returnMode`. */
 	data: Array<INodeExecutionData[] | null>;
 	waitTill?: Date | null;
 }
@@ -3142,6 +3152,7 @@ export interface ExecuteWorkflowOptions {
 	doNotWaitToFinish?: boolean;
 	parentExecution?: RelatedExecution;
 	executionMode?: WorkflowExecuteMode;
+	returnMode?: SubWorkflowReturnMode;
 }
 
 export type AiEvent =

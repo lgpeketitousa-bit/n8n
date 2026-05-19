@@ -31,7 +31,7 @@ import { Push } from '@/push';
 import { WorkflowStatisticsService } from '@/services/workflow-statistics.service';
 import { isWorkflowIdValid } from '@/utils';
 import { getItemCountByConnectionType } from '@/utils/get-item-count-by-connection-type';
-import { getDataLastExecutedNodeData } from '@/workflow-helpers';
+import { getLastExecutedNodeData } from '@/workflow-helpers';
 import { WorkflowStaticDataService } from '@/workflows/workflow-static-data.service';
 
 // eslint-disable-next-line import-x/no-cycle
@@ -493,7 +493,7 @@ async function duplicateBinaryDataToParent(
 	parentExecution: RelatedExecution,
 	binaryDataService: BinaryDataService,
 ) {
-	const outputData = getDataLastExecutedNodeData(fullRunData);
+	const outputData = getLastExecutedNodeData(fullRunData);
 	if (outputData?.data?.main) {
 		const duplicatedData = await binaryDataService.duplicateBinaryData(
 			FileLocation.ofExecution(parentExecution.workflowId, parentExecution.executionId),

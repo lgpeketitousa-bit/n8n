@@ -5,6 +5,7 @@ import type {
 	INodeExecutionData,
 	INodeType,
 	INodeTypeDescription,
+	SubWorkflowReturnMode,
 } from 'n8n-workflow';
 
 import { findPairedItemThroughWorkflowData } from './../../../utils/workflow-backtracking';
@@ -20,7 +21,7 @@ export class ExecuteWorkflow implements INodeType {
 		icon: 'node:execute-sub-workflow',
 		iconColor: 'orange-red',
 		group: ['transform'],
-		version: [1, 1.1, 1.2, 1.3],
+		version: [1, 1.1, 1.2, 1.3, 1.4],
 		subtitle: '={{"Workflow: " + $parameter["workflowId"]}}',
 		description: 'Execute another workflow',
 		defaults: {
@@ -267,6 +268,43 @@ export class ExecuteWorkflow implements INodeType {
 						description:
 							'Whether the main workflow should wait for the sub-workflow to complete its execution before proceeding',
 					},
+					{
+						// eslint-disable-next-line n8n-nodes-base/node-param-display-name-miscased
+						displayName: 'Items to receive',
+						name: 'itemsFromSubWorkflow',
+						type: 'options',
+						default: 'fromSubWorkflow',
+						description:
+							'Which items to receive from the sub-workflow when its last node ran multiple times (for example, after a Loop Over Items)',
+						displayOptions: {
+							show: {
+								'@version': [{ _cnd: { gte: 1.4 } }],
+							},
+						},
+						options: [
+							{
+								// eslint-disable-next-line n8n-nodes-base/node-param-display-name-miscased
+								name: 'Use sub-workflow setting',
+								value: 'fromSubWorkflow',
+								description:
+									"Defer to the 'Items to return' setting configured on the sub-workflow's Execute Workflow Trigger",
+							},
+							{
+								// eslint-disable-next-line n8n-nodes-base/node-param-display-name-miscased
+								name: 'All items from every run',
+								value: 'allRuns',
+								description:
+									'Override the sub-workflow setting and receive every item the last node produced, across all its runs',
+							},
+							{
+								// eslint-disable-next-line n8n-nodes-base/node-param-display-name-miscased
+								name: 'Items from the last run only',
+								value: 'lastRunOnly',
+								description:
+									"Override the sub-workflow setting and receive only the items from the last node's final run. Use this to preserve behavior from older sub-workflows.",
+							},
+						],
+					},
 				],
 			},
 		],
@@ -294,6 +332,18 @@ export class ExecuteWorkflow implements INodeType {
 
 		const workflowProxy = this.getWorkflowDataProxy(0);
 		const currentWorkflowId = workflowProxy.$workflow.id as string;
+		const callerTypeVersion = this.getNode()?.typeVersion ?? 0;
+		const itemsFromSubWorkflow = this.getNodeParameter(
+			'options.itemsFromSubWorkflow',
+			0,
+			'fromSubWorkflow',
+		) as SubWorkflowReturnMode;
+
+		// Pre-1.4 nodes stay frozen on the historical single-run output.
+		// From 1.4, the user's `itemsFromSubWorkflow` option drives the choice.
+		// See n8n-io/n8n#9989.
+		const returnMode: SubWorkflowReturnMode =
+			callerTypeVersion < 1.4 ? 'lastRunOnly' : itemsFromSubWorkflow;
 
 		if (mode === 'each') {
 			const returnData: INodeExecutionData[][] = [];
@@ -319,6 +369,7 @@ export class ExecuteWorkflow implements INodeType {
 									shouldResume: waitForSubWorkflow,
 								},
 								executionMode: this.getMode(),
+								returnMode,
 							},
 						);
 						const workflowResult = executionResult.data as INodeExecutionData[][];
@@ -422,6 +473,7 @@ export class ExecuteWorkflow implements INodeType {
 							shouldResume: waitForSubWorkflow,
 						},
 						executionMode: this.getMode(),
+						returnMode,
 					},
 				);
 

@@ -1,5 +1,10 @@
 import { mock } from 'jest-mock-extended';
-import type { IExecuteFunctions, IWorkflowDataProxyData, INode } from 'n8n-workflow';
+import type {
+	IExecuteFunctions,
+	INode,
+	IWorkflowDataProxyData,
+	SubWorkflowReturnMode,
+} from 'n8n-workflow';
 
 import { ExecuteWorkflow } from './ExecuteWorkflow.node';
 import { getWorkflowInfo } from './GenericFunctions';
@@ -34,6 +39,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce('each') // mode
 			.mockReturnValueOnce({}) // workflowInputs.value
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true); // waitForSubWorkflow
 
 		executeFunctions.getInputData.mockReturnValue([{ json: { key: 'value' } }]);
@@ -72,6 +78,7 @@ describe('ExecuteWorkflow', () => {
 					workflowId: 'workflowId',
 					shouldResume: true,
 				},
+				returnMode: 'lastRunOnly',
 			},
 		);
 	});
@@ -82,6 +89,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce('once') // mode
 			.mockReturnValueOnce({}) // workflowInputs.value
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(false); // waitForSubWorkflow
 
 		executeFunctions.getInputData.mockReturnValue([{ json: { key: 'value' } }]);
@@ -110,6 +118,7 @@ describe('ExecuteWorkflow', () => {
 					workflowId: 'workflowId',
 					shouldResume: false,
 				},
+				returnMode: 'lastRunOnly',
 			},
 		);
 	});
@@ -120,6 +129,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce('each') // mode
 			.mockReturnValueOnce({}) // workflowInputs.value
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true); // waitForSubWorkflow
 
 		executeFunctions.getNode.mockReturnValue({ typeVersion: 1.2 } as INode);
@@ -140,6 +150,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce({}) // workflowInputs.value (item 1)
 			.mockReturnValueOnce({}) // workflowInputs.value (item 2)
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true) // waitForSubWorkflow (item 0)
 			.mockReturnValueOnce(true) // waitForSubWorkflow (item 1)
 			.mockReturnValueOnce(true); // waitForSubWorkflow (item 2)
@@ -169,6 +180,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce('each') // mode
 			.mockReturnValueOnce({}) // workflowInputs.value
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true); // waitForSubWorkflow
 
 		executeFunctions.getNode.mockReturnValue({ typeVersion: 1.3 } as INode);
@@ -189,6 +201,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce({}) // workflowInputs.value (item 1)
 			.mockReturnValueOnce({}) // workflowInputs.value (item 2)
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true) // waitForSubWorkflow (item 0)
 			.mockReturnValueOnce(true) // waitForSubWorkflow (item 1)
 			.mockReturnValueOnce(true); // waitForSubWorkflow (item 2)
@@ -220,6 +233,7 @@ describe('ExecuteWorkflow', () => {
 			.mockReturnValueOnce('each') // mode
 			.mockReturnValueOnce({}) // workflowInputs.value
 			.mockReturnValueOnce([]) // workflowInputs.schema
+			.mockReturnValueOnce(undefined) // options.itemsFromSubWorkflow
 			.mockReturnValueOnce(true); // waitForSubWorkflow
 
 		(getWorkflowInfo as jest.Mock).mockRejectedValue(new Error('Test error'));
@@ -228,5 +242,127 @@ describe('ExecuteWorkflow', () => {
 		await expect(executeWorkflow.execute.call(executeFunctions)).rejects.toThrow(
 			'Error executing workflow with item at index 0',
 		);
+	});
+
+	describe('returnMode forwarding (v1.4)', () => {
+		test.each<{
+			scenario: string;
+			callerOption: SubWorkflowReturnMode | undefined;
+			typeVersion: number;
+			expectedForwarded: SubWorkflowReturnMode;
+		}>([
+			{
+				scenario: 'v1.4 caller forwards `fromSubWorkflow` when the option defers',
+				callerOption: 'fromSubWorkflow',
+				typeVersion: 1.4,
+				expectedForwarded: 'fromSubWorkflow',
+			},
+			{
+				scenario: 'v1.4 caller forwards an explicit `allRuns` override',
+				callerOption: 'allRuns',
+				typeVersion: 1.4,
+				expectedForwarded: 'allRuns',
+			},
+			{
+				scenario: 'v1.4 caller forwards an explicit `lastRunOnly` override',
+				callerOption: 'lastRunOnly',
+				typeVersion: 1.4,
+				expectedForwarded: 'lastRunOnly',
+			},
+			{
+				scenario: 'v1.3 caller is locked to `lastRunOnly`',
+				callerOption: undefined,
+				typeVersion: 1.3,
+				expectedForwarded: 'lastRunOnly',
+			},
+		])('$scenario', async ({ callerOption, typeVersion, expectedForwarded }) => {
+			executeFunctions.getNodeParameter
+				.mockReturnValueOnce('database') // source
+				.mockReturnValueOnce('once') // mode
+				.mockReturnValueOnce({}) // workflowInputs.value
+				.mockReturnValueOnce([]) // workflowInputs.schema
+				.mockReturnValueOnce(callerOption ?? 'fromSubWorkflow') // options.itemsFromSubWorkflow (ignored for pre-1.4)
+				.mockReturnValueOnce(true); // waitForSubWorkflow
+
+			executeFunctions.getNode.mockReturnValue({ typeVersion } as INode);
+			(getWorkflowInfo as jest.Mock).mockResolvedValue({ id: 'subWorkflowId' });
+			executeFunctions.executeWorkflow.mockResolvedValue({
+				executionId: 'subExecutionId',
+				data: [[{ json: { merged: true } }]],
+			});
+
+			await executeWorkflow.execute.call(executeFunctions);
+
+			expect(executeFunctions.executeWorkflow).toHaveBeenCalledWith(
+				{ id: 'subWorkflowId' },
+				expect.anything(),
+				undefined,
+				expect.objectContaining({ returnMode: expectedForwarded }),
+			);
+		});
+
+		test('forwards `returnMode` in `each` mode (one call per input item)', async () => {
+			executeFunctions.getNodeParameter
+				.mockReturnValueOnce('database') // source
+				.mockReturnValueOnce('each') // mode
+				.mockReturnValueOnce({}) // workflowInputs.value (item 0)
+				.mockReturnValueOnce({}) // workflowInputs.value (item 1)
+				.mockReturnValueOnce([]) // workflowInputs.schema
+				.mockReturnValueOnce('allRuns') // options.itemsFromSubWorkflow
+				.mockReturnValueOnce(true) // waitForSubWorkflow (item 0)
+				.mockReturnValueOnce(true); // waitForSubWorkflow (item 1)
+
+			executeFunctions.getNode.mockReturnValue({ typeVersion: 1.4 } as INode);
+			executeFunctions.getInputData.mockReturnValue([
+				{ json: { key: 'a' } },
+				{ json: { key: 'b' } },
+			]);
+			(getWorkflowInfo as jest.Mock).mockResolvedValue({ id: 'subWorkflowId' });
+			executeFunctions.executeWorkflow.mockResolvedValue({
+				executionId: 'subExecutionId',
+				data: [[{ json: { merged: true } }]],
+			});
+
+			await executeWorkflow.execute.call(executeFunctions);
+
+			expect(executeFunctions.executeWorkflow).toHaveBeenCalledTimes(2);
+			expect(executeFunctions.executeWorkflow).toHaveBeenNthCalledWith(
+				1,
+				{ id: 'subWorkflowId' },
+				expect.anything(),
+				undefined,
+				expect.objectContaining({ returnMode: 'allRuns' }),
+			);
+			expect(executeFunctions.executeWorkflow).toHaveBeenNthCalledWith(
+				2,
+				{ id: 'subWorkflowId' },
+				expect.anything(),
+				undefined,
+				expect.objectContaining({ returnMode: 'allRuns' }),
+			);
+		});
+
+		test('forwards executionResult.data to the parent without modification', async () => {
+			executeFunctions.getNodeParameter
+				.mockReturnValueOnce('database') // source
+				.mockReturnValueOnce('once') // mode
+				.mockReturnValueOnce({}) // workflowInputs.value
+				.mockReturnValueOnce([]) // workflowInputs.schema
+				.mockReturnValueOnce('allRuns') // options.itemsFromSubWorkflow
+				.mockReturnValueOnce(true); // waitForSubWorkflow
+			executeFunctions.getNode.mockReturnValue({ typeVersion: 1.4 } as INode);
+			(getWorkflowInfo as jest.Mock).mockResolvedValue({ id: 'subWorkflowId' });
+			executeFunctions.executeWorkflow.mockResolvedValue({
+				executionId: 'subExecutionId',
+				data: [[{ json: { merged: true } }]],
+			});
+
+			const result = await executeWorkflow.execute.call(executeFunctions);
+
+			const expectedDataForwardedWithPairedItem = [
+				{ json: { merged: true }, pairedItem: { item: 0 } },
+			];
+			expect(result[0]).toEqual(expectedDataForwardedWithPairedItem);
+		});
 	});
 });
