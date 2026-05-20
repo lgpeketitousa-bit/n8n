@@ -1,6 +1,6 @@
 import { gfm } from '@joplin/turndown-plugin-gfm';
 import { Readability } from '@mozilla/readability';
-import type { FetchedPage } from '@n8n/instance-ai';
+import type { FetchedPage } from '@n8n/ai-utilities';
 import { parseHTML } from 'linkedom';
 import type { SsrfBridge } from 'n8n-core';
 import TurndownService from 'turndown';
