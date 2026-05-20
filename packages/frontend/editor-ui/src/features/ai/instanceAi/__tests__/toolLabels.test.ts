@@ -10,8 +10,20 @@ vi.mock('@n8n/i18n', () => ({
 				'instanceAi.tools.executions': 'Run workflow',
 				'instanceAi.tools.workspace_execute_command': 'Running command',
 				'instanceAi.tools.workspace_execute_command.skill': 'Running skill script',
-				'instanceAi.tools.skills_list': 'Checking skills',
-				'instanceAi.tools.skill_view': 'Loading skill',
+				'instanceAi.tools.workspace_execute_command.skillScript': 'Running',
+				'instanceAi.tools.skills_list': 'Checking available skills',
+				'instanceAi.tools.skill_view': 'Opening skill',
+				'instanceAi.tools.skill_view.asset': 'Opening',
+				'instanceAi.tools.skill_view.assetFallback': 'asset',
+				'instanceAi.tools.skill_view.example': 'Reading',
+				'instanceAi.tools.skill_view.exampleFallback': 'example',
+				'instanceAi.tools.skill_view.file': 'Reading',
+				'instanceAi.tools.skill_view.reference': 'Reading',
+				'instanceAi.tools.skill_view.referenceFallback': 'reference',
+				'instanceAi.tools.skill_view.script': 'Inspecting',
+				'instanceAi.tools.skill_view.scriptFallback': 'script',
+				'instanceAi.tools.skill_view.template': 'Reading',
+				'instanceAi.tools.skill_view.templateFallback': 'template',
 				'instanceAi.stepTimeline.showData': 'Show data',
 				'instanceAi.stepTimeline.hideData': 'Hide data',
 				'instanceAi.stepTimeline.showBrief': 'Show brief',
@@ -98,22 +110,36 @@ describe('useToolLabel', () => {
 		const { getToolLabel } = useToolLabel();
 		expect(getToolLabel('nodes')).toBe('Search nodes');
 		expect(getToolLabel('workspace_execute_command')).toBe('Running command');
-		expect(getToolLabel('skills_list')).toBe('Checking skills');
+		expect(getToolLabel('skills_list')).toBe('Checking available skills');
 		expect(getToolLabel('skill_view', { name: 'workflow-auditor' })).toBe(
-			'Loading skill: workflow-auditor',
+			'Opening skill: workflow-auditor',
 		);
 		expect(
-			getToolLabel('skill_view', { name: 'workflow-auditor', filePath: 'scripts/a.mjs' }),
-		).toBe('Loading skill: workflow-auditor/scripts/a.mjs');
+			getToolLabel('skill_view', {
+				name: 'workflow-auditor',
+				filePath: 'references/audit-rubric.md',
+			}),
+		).toBe('Reading audit rubric');
+		expect(
+			getToolLabel('skill_view', {
+				name: 'workflow-auditor',
+				filePath: 'scripts/audit-workflow.mjs',
+			}),
+		).toBe('Inspecting audit workflow script');
 	});
 
 	test('getToolLabel shows skill script commands cleanly', () => {
 		const { getToolLabel } = useToolLabel();
 		expect(
 			getToolLabel('workspace_execute_command', {
-				command: 'node /home/daytona/workspace/skills/workflow-auditor/scripts/audit.mjs',
+				command: 'node /home/daytona/workspace/skills/workflow-auditor/scripts/audit-workflow.mjs',
 			}),
-		).toBe('Running skill script');
+		).toBe('Running audit workflow script');
+		expect(
+			getToolLabel('workspace_execute_command', {
+				command: 'node $N8N_SKILL_DIR/scripts/audit-workflow.mjs',
+			}),
+		).toBe('Running audit workflow script');
 	});
 
 	test('getToolLabel falls back to raw tool name when not found', () => {
