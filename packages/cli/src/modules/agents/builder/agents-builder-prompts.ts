@@ -284,8 +284,8 @@ search when a search service credential is configured.
 \`\`\`
 
 When fallback search is required, call \`list_credentials\` with
-\`["braveSearchApi","searXngApi"]\`, choose \`braveSearchApi\` if both exist,
-then call \`ask_credential\` for that single credential type and store:
+\`["braveSearchApi"]\`, then call \`ask_credential\` for \`braveSearchApi\`
+if a Brave Search credential needs to be selected or created. Store:
 \`\`\`json
 {
   "webSearch": {
