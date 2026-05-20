@@ -265,7 +265,20 @@ export class ActiveWorkflows {
 						workflowId: workflow.id,
 					});
 
+<<<<<<< HEAD
+=======
+					// The initial activation poll runs inside ActiveWorkflowManager's
+					// outer acquireIsolate window, which also covers countTriggers
+					// afterwards. Acquiring here would release the outer bridge early
+					// (acquire is idempotent per caller; release deletes it). Scheduled
+					// polls fire from the cron scheduler's own async context outside
+					// that window and must acquire/release per tick — see CAT-3147.
+					const ownsIsolate = !testingTrigger;
+
+>>>>>>> 5f97ef3e (fix(core): Report scheduled-poll isolate acquisition failures via __emitError (#30743))
 					try {
+						if (ownsIsolate) await workflow.expression.acquireIsolate();
+
 						const pollResponse = await this.triggersAndPollers.runPoll(
 							workflow,
 							node,
