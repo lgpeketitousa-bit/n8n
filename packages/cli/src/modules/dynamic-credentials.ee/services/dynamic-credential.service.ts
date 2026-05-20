@@ -10,6 +10,7 @@ import type {
 } from 'n8n-workflow';
 import { jsonParse, toCredentialContext } from 'n8n-workflow';
 
+import { DynamicCredentialsProxy } from '@/credentials/dynamic-credentials-proxy';
 import { LoadNodesAndCredentials } from '@/load-nodes-and-credentials';
 import { StaticAuthService } from '@/services/static-auth-service';
 
@@ -36,6 +37,14 @@ import { AuthenticatedRequest } from '@n8n/db';
  */
 @Service()
 export class DynamicCredentialService implements ICredentialResolutionProvider {
+	/**
+	 * Cached system resolver id. Populated on the first successful lookup and
+	 * reused thereafter — the seeder writes an idempotent row whose id never
+	 * changes. Stays null until the seeder has actually run (e.g. on a follower
+	 * that started before the leader seeded), so a missing row isn't memoised.
+	 */
+	private cachedSystemResolverId: string | null = null;
+
 	constructor(
 		private readonly dynamicCredentialConfig: DynamicCredentialsConfig,
 		private readonly resolverRegistry: DynamicCredentialResolverRegistry,
@@ -44,6 +53,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		private readonly cipher: Cipher,
 		private readonly logger: Logger,
 		private readonly expressionService: ResolverConfigExpressionService,
+		private readonly dynamicCredentialsProxy: DynamicCredentialsProxy,
 	) {}
 
 	/**
@@ -63,8 +73,10 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		workflowSettings?: IWorkflowSettings,
 	): Promise<CredentialResolutionResult> {
 		// Determine which resolver ID to use: credential's own resolver or workflow's fallback
+		// (explicit workflow override, or the seeded system resolver looked up via the proxy).
 		const resolverId =
-			credentialsResolveMetadata.resolverId ?? workflowSettings?.credentialResolverId;
+			credentialsResolveMetadata.resolverId ??
+			(await this.dynamicCredentialsProxy.getEffectiveResolverId(workflowSettings));
 
 		// Not resolvable - return static credentials
 		if (!credentialsResolveMetadata.isResolvable) {
@@ -144,8 +156,16 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		}
 	}
 
-	getSystemResolverId(): string {
-		return SYSTEM_RESOLVER_ID;
+	/**
+	 * Returns the seeded system resolver id used to store per-user OAuth tokens
+	 * during interactive connect flows. Caches the lookup since the row's id
+	 * never changes once seeded.
+	 */
+	async getSystemResolverId(): Promise<string | null> {
+		if (this.cachedSystemResolverId) return this.cachedSystemResolverId;
+		const seeded = await this.resolverRepository.findOneBy({ id: SYSTEM_RESOLVER_ID });
+		this.cachedSystemResolverId = seeded?.id ?? null;
+		return this.cachedSystemResolverId;
 	}
 
 	/**

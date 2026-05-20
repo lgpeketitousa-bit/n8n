@@ -43,11 +43,22 @@ export class DynamicCredentialsProxy
 	 * Returns null when the system resolver has not been seeded or the dynamic
 	 * credentials provider is not registered.
 	 */
-	getSystemResolverId(): string | null {
+	async getSystemResolverId(): Promise<string | null> {
 		if (!this.resolvingProvider) {
 			return null;
 		}
-		return this.resolvingProvider.getSystemResolverId();
+		return await this.resolvingProvider.getSystemResolverId();
+	}
+
+	/**
+	 * Returns the resolver id that should be used for a workflow: the explicit
+	 * `settings.credentialResolverId` override if present, otherwise the seeded
+	 * system resolver id (null when the system resolver isn't available).
+	 */
+	async getEffectiveResolverId(
+		settings: Pick<IWorkflowSettings, 'credentialResolverId'> | undefined,
+	): Promise<string | null> {
+		return settings?.credentialResolverId ?? (await this.getSystemResolverId());
 	}
 
 	async resolveIfNeeded(

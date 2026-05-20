@@ -210,16 +210,45 @@ describe('DynamicCredentialsProxy', () => {
 	});
 
 	describe('getSystemResolverId', () => {
-		it('returns null when no resolver provider is set', () => {
-			expect(proxy.getSystemResolverId()).toBeNull();
+		it('returns null when no resolver provider is set', async () => {
+			await expect(proxy.getSystemResolverId()).resolves.toBeNull();
 		});
 
-		it('delegates to the resolver provider when set', () => {
-			mockResolverProvider.getSystemResolverId.mockReturnValue('system-n8n');
+		it('delegates to the resolver provider when set', async () => {
+			mockResolverProvider.getSystemResolverId.mockResolvedValue('system-n8n');
 			proxy.setResolverProvider(mockResolverProvider);
 
-			expect(proxy.getSystemResolverId()).toBe('system-n8n');
+			await expect(proxy.getSystemResolverId()).resolves.toBe('system-n8n');
 			expect(mockResolverProvider.getSystemResolverId).toHaveBeenCalled();
+		});
+	});
+
+	describe('getEffectiveResolverId', () => {
+		it('returns the workflow override when set, ignoring the system resolver', async () => {
+			mockResolverProvider.getSystemResolverId.mockResolvedValue('system-id');
+			proxy.setResolverProvider(mockResolverProvider);
+			const settings: IWorkflowSettings = { credentialResolverId: 'override-id' };
+
+			await expect(proxy.getEffectiveResolverId(settings)).resolves.toBe('override-id');
+			expect(mockResolverProvider.getSystemResolverId).not.toHaveBeenCalled();
+		});
+
+		it('falls back to the system resolver id when no override is set', async () => {
+			mockResolverProvider.getSystemResolverId.mockResolvedValue('system-id');
+			proxy.setResolverProvider(mockResolverProvider);
+
+			await expect(proxy.getEffectiveResolverId({})).resolves.toBe('system-id');
+		});
+
+		it('returns null when neither the workflow nor the provider provides an id', async () => {
+			await expect(proxy.getEffectiveResolverId(undefined)).resolves.toBeNull();
+		});
+
+		it('handles undefined settings without throwing', async () => {
+			mockResolverProvider.getSystemResolverId.mockResolvedValue('system-id');
+			proxy.setResolverProvider(mockResolverProvider);
+
+			await expect(proxy.getEffectiveResolverId(undefined)).resolves.toBe('system-id');
 		});
 	});
 });
