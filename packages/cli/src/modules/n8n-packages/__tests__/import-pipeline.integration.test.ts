@@ -3,6 +3,7 @@ import { ProjectRepository, SharedWorkflowRepository, WorkflowRepository } from 
 import { Container } from '@n8n/di';
 import type { Readable } from 'node:stream';
 
+import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { EventService } from '@/events/event.service';
 
 import { createFolder } from '@test-integration/db/folders';
@@ -268,6 +269,28 @@ describe('ImportPipeline rejection cases', () => {
 		return await buildPackage([validWorkflow('wf-x', 'X')]);
 	}
 
+	it('rejects packages with an invalid manifest', async () => {
+		const owner = await createOwner();
+		const writer = new TarPackageWriter();
+		writer.writeFile(
+			'manifest.json',
+			JSON.stringify({
+				packageFormatVersion: '99',
+				exportedAt: new Date().toISOString(),
+				sourceN8nVersion: '1.0.0',
+				sourceId: 'bad-manifest',
+			}),
+		);
+		const tarBuffer = await streamToBuffer(writer.finalize());
+
+		await expect(
+			Container.get(N8nPackagesService).importPackage({
+				user: owner,
+				packageBuffer: tarBuffer,
+			}),
+		).rejects.toThrow(BadRequestError);
+	});
+
 	it('rejects when the requested projectId does not exist', async () => {
 		const owner = await createOwner();
 
@@ -332,7 +355,7 @@ describe('ImportPipeline rejection cases', () => {
 				user: owner,
 				packageBuffer: await streamToBuffer(writer.finalize()),
 			}),
-		).rejects.toThrow();
+		).rejects.toThrow(BadRequestError);
 	});
 
 	it('rejects when the manifest references a workflow file that is not in the tar', async () => {

@@ -91,6 +91,9 @@ post:
                     activeVersionId:
                       type: string
                       nullable: true
+                      description: >
+                        Published version on the target instance. Always null
+                        immediately after import.
     '400':
       $ref: '../../../../shared/spec/responses/badRequest.yml'
     '401':

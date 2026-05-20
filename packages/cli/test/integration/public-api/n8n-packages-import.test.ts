@@ -1,4 +1,5 @@
 import { mockInstance, testDb } from '@n8n/backend-test-utils';
+import { GlobalConfig } from '@n8n/config';
 import { LICENSE_FEATURES } from '@n8n/constants';
 import type { Project, User } from '@n8n/db';
 import { ProjectRepository } from '@n8n/db';
@@ -32,6 +33,11 @@ beforeEach(async () => {
 	await testDb.truncate(['WorkflowEntity', 'SharedWorkflow']);
 	authOwnerAgent = testServer.publicApiAgentFor(owner);
 	testServer.license.enable(LICENSE_FEATURES.N8N_PACKAGES);
+	Container.get(GlobalConfig).publicApi.packagesEnabled = true;
+});
+
+afterEach(() => {
+	Container.get(GlobalConfig).publicApi.packagesEnabled = false;
 });
 
 const testWithAPIKey = (method: 'post', url: string, apiKey: string | null) => async () => {

@@ -1,5 +1,6 @@
 import type { WorkflowEntity } from '@n8n/db';
 import { Service } from '@n8n/di';
+import type { IConnections, INode } from 'n8n-workflow';
 
 import {
 	serializedWorkflowSchema,
@@ -32,10 +33,13 @@ export class WorkflowSerializer {
 	 * archived state the source had it in.
 	 */
 	deserialize(wire: SerializedWorkflow): Partial<WorkflowEntity> {
+		// The zod schema is a deliberate subset of INode/IConnections — narrower
+		// than the runtime types (no NodeConnectionType brand, fewer optional
+		// fields). The wire has already been zod-validated so the cast is safe.
 		const partial: Partial<WorkflowEntity> = {
 			name: wire.name,
-			nodes: wire.nodes,
-			connections: wire.connections,
+			nodes: wire.nodes as INode[],
+			connections: wire.connections as IConnections,
 			isArchived: wire.isArchived,
 		};
 

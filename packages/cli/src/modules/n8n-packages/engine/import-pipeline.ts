@@ -1,11 +1,14 @@
+import { GlobalConfig } from '@n8n/config';
 import type { Project, User } from '@n8n/db';
 import { ProjectRepository } from '@n8n/db';
 import { Service } from '@n8n/di';
 import { DataSource } from '@n8n/typeorm';
 import { UserError } from 'n8n-workflow';
+import { ZodError } from 'zod';
 
-import { NotFoundError } from '@/errors/response-errors/not-found.error';
+import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
+import { NotFoundError } from '@/errors/response-errors/not-found.error';
 import { EventService } from '@/events/event.service';
 import { ExternalHooks } from '@/external-hooks';
 import { FolderService } from '@/services/folder.service';
@@ -22,6 +25,7 @@ export class ImportPipeline {
 	constructor(
 		private readonly workflowImporter: WorkflowImporter,
 		private readonly dataSource: DataSource,
+		private readonly globalConfig: GlobalConfig,
 		private readonly projectRepository: ProjectRepository,
 		private readonly projectService: ProjectService,
 		private readonly folderService: FolderService,
@@ -30,9 +34,26 @@ export class ImportPipeline {
 	) {}
 
 	async run(request: ImportPackageRequest): Promise<ImportResult> {
-		const reader = new TarPackageReader(request.packageBuffer);
-		const rawManifest = await reader.readManifest();
-		const manifest = packageManifestSchema.parse(rawManifest);
+		const maxUncompressedBytes = this.globalConfig.endpoints.payloadSizeMax * 1024 * 1024;
+		const reader = new TarPackageReader(request.packageBuffer, maxUncompressedBytes);
+
+		let rawManifest: unknown;
+		try {
+			rawManifest = await reader.readManifest();
+		} catch (error) {
+			if (error instanceof BadRequestError) throw error;
+			throw new BadRequestError('Failed to read package manifest');
+		}
+
+		let manifest;
+		try {
+			manifest = packageManifestSchema.parse(rawManifest);
+		} catch (error) {
+			if (error instanceof ZodError) {
+				throw new BadRequestError('Package manifest failed validation');
+			}
+			throw error;
+		}
 
 		const { target, project } = await this.resolveTarget(
 			request.user,
