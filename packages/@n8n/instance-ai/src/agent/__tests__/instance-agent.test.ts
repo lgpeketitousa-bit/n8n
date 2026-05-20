@@ -7,6 +7,7 @@ const mockAgentInstances: Array<{
 	checkpoint: jest.Mock;
 	memory: jest.Mock;
 	telemetry: jest.Mock;
+	workspace: jest.Mock;
 }> = [];
 
 jest.mock('@n8n/agents', () => ({
@@ -19,6 +20,7 @@ jest.mock('@n8n/agents', () => ({
 		this.checkpoint = jest.fn().mockReturnThis();
 		this.memory = jest.fn().mockReturnThis();
 		this.telemetry = jest.fn().mockReturnThis();
+		this.workspace = jest.fn().mockReturnThis();
 		mockAgentInstances.push(this);
 	}),
 }));
@@ -209,9 +211,9 @@ describe('createInstanceAgent', () => {
 		expect(deferredTools['executions-checkpoint-run']).toBeUndefined();
 	});
 
-	it('does not attach a workspace to the orchestrator Agent', async () => {
+	it('attaches the shared runtime workspace to the orchestrator Agent', async () => {
 		const memoryConfig = { lastMessages: 20 } as never;
-		const fakeWorkspace = { id: 'should-be-ignored' } as never;
+		const fakeWorkspace = { id: 'should-be-attached' } as never;
 
 		await createInstanceAgent({
 			modelId: 'test-model',
@@ -228,20 +230,11 @@ describe('createInstanceAgent', () => {
 			},
 			memoryConfig,
 			mcpManager: createMcpManagerStub(),
-			// Exercise the deprecated field to confirm it is ignored.
 			workspace: fakeWorkspace,
 		} as never);
 
 		expect(Agent).toHaveBeenCalledWith('n8n-instance-agent');
-		expect(mockAgentInstances[0]?.tool).toHaveBeenCalledTimes(1);
-		expect(
-			JSON.stringify([
-				mockAgentInstances[0]?.model.mock.calls,
-				mockAgentInstances[0]?.instructions.mock.calls,
-				mockAgentInstances[0]?.tool.mock.calls,
-				mockAgentInstances[0]?.checkpoint.mock.calls,
-			]),
-		).not.toContain('should-be-ignored');
+		expect(mockAgentInstances[0]?.workspace).toHaveBeenCalledWith(fakeWorkspace);
 	});
 
 	it('attaches native telemetry from the trace context when present', async () => {

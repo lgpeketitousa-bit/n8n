@@ -101,6 +101,7 @@ export type { SuspensionInfo, Resumable } from './utils/stream-helpers';
 export { buildAgentTreeFromEvents, findAgentNodeInTree } from './utils/agent-tree';
 export { createSandbox, createWorkspace } from './workspace/create-workspace';
 export type { SandboxConfig } from './workspace/create-workspace';
+export { getWorkspaceRoot } from './workspace/sandbox-setup';
 export { BuilderSandboxFactory } from './workspace/builder-sandbox-factory';
 export type { BuilderWorkspace } from './workspace/builder-sandbox-factory';
 export { SnapshotManager } from './workspace/snapshot-manager';

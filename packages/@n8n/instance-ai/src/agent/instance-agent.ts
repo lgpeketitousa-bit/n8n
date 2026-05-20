@@ -5,8 +5,8 @@ import {
 	createClaimedToolNames,
 	type McpToolNameValidationError,
 } from './mcp-tool-name-validation';
+import { attachRuntimeWorkspaceCapabilities } from './runtime-workspace';
 import { getSystemPrompt } from './system-prompt';
-import { hasRuntimeSkills } from '../skills/runtime-skills';
 import {
 	createToolRegistry,
 	filterToolRegistry,
@@ -159,8 +159,6 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 		branchReadOnly: context.branchReadOnly,
 	});
 
-	// The orchestrator intentionally does not receive a workspace. Sandbox access
-	// is scoped to the workflow-builder subagent via `builderSandboxFactory`.
 	const telemetry = orchestrationContext?.tracing?.getTelemetry?.({
 		agentRole: 'orchestrator',
 		functionId: 'instance-ai.orchestrator',
@@ -178,10 +176,11 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 	if (hasDeferrableTools) {
 		agent.deferredTool(toolRegistryValues(deferredTools), { search: { topK: 5 } });
 	}
-	const runtimeSkills = orchestrationContext?.runtimeSkills;
-	if (hasRuntimeSkills(runtimeSkills)) {
-		agent.skills(runtimeSkills);
-	}
+	attachRuntimeWorkspaceCapabilities(agent, {
+		workspace: orchestrationContext?.workspace,
+		runtimeSkills:
+			orchestrationContext?.runtimeWorkspaceSkills ?? orchestrationContext?.runtimeSkills,
+	});
 	if (telemetry) {
 		agent.telemetry(telemetry);
 	}
@@ -200,6 +199,8 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 				: {}),
 		});
 	}
+	const runtimeSkills =
+		orchestrationContext?.runtimeWorkspaceSkills ?? orchestrationContext?.runtimeSkills;
 
 	mergeTraceRunInputs(
 		orchestrationContext?.tracing?.actorRun,

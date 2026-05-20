@@ -1035,8 +1035,10 @@ export interface OrchestrationContext {
 	localMcpServer?: LocalMcpServer;
 	/** MCP tools loaded from external servers — available for delegation to sub-agents */
 	mcpTools?: InstanceAiToolRegistry;
-	/** Runtime-loadable skills available to the orchestrator and build-focused sub-agents. */
+	/** Runtime-loadable skills from the bundled/catalog source. */
 	runtimeSkills?: RuntimeSkillSource;
+	/** Runtime skills materialized into the shared runtime workspace for direct execution. */
+	runtimeWorkspaceSkills?: RuntimeSkillSource;
 	/** OAuth2 callback URL for the n8n instance (e.g. http://localhost:5678/rest/oauth2-credential/callback) */
 	oauth2CallbackUrl?: string;
 	/** Webhook base URL for the n8n instance (e.g. http://localhost:5678/webhook) — used to construct webhook URLs for created workflows */
@@ -1051,7 +1053,7 @@ export interface OrchestrationContext {
 	plannedTaskService?: PlannedTaskService;
 	/** Run one scheduler pass after plan/task state changes. */
 	schedulePlannedTasks?: () => Promise<void>;
-	/** Sandbox workspace — when present, enables sandbox-based workflow building */
+	/** Shared runtime workspace for the current orchestration context. */
 	workspace?: Workspace;
 	/** Factory for creating per-builder ephemeral sandboxes from a pre-warmed snapshot */
 	builderSandboxFactory?: BuilderSandboxFactory;
@@ -1118,12 +1120,7 @@ export interface CreateInstanceAgentOptions {
 	 * Intended for tests and fallback paths that need the full toolset visible immediately.
 	 */
 	disableDeferredTools?: boolean;
-	/**
-	 * @deprecated Ignored by the orchestrator. Passing a workspace here used to auto-register
-	 * workspace tools on the orchestrator, which the LLM abused as a `sleep` primitive
-	 * and mis-routed for build-task polling. Sandbox access is now scoped to the workflow-builder
-	 * subagent via `builderSandboxFactory`; `orchestrationContext.workspace` still flows to it.
-	 */
+	/** @deprecated Use `orchestrationContext.workspace` for the shared runtime workspace. */
 	workspace?: Workspace;
 	/** IANA time zone for the current user (e.g. "Europe/Helsinki"). Falls back to instance default. */
 	timeZone?: string;

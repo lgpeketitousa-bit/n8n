@@ -28,12 +28,14 @@ import {
 	createAllTools,
 	createSandbox,
 	createWorkspace,
+	getWorkspaceRoot,
 	createInstanceAiTraceContext,
 	createInternalOperationTraceContext,
 	continueInstanceAiTraceContext,
 	createInstanceAiLivenessPolicyConfig,
 	InstanceAiLivenessPolicy,
 	loadInstanceAiRuntimeSkillSource,
+	materializeRuntimeSkillsIntoWorkspace,
 	McpClientManager,
 	BuilderSandboxFactory,
 	SnapshotManager,
@@ -409,7 +411,7 @@ export class InstanceAiService {
 			traceSlug?: string;
 		}
 	>();
-	/** Active sandboxes keyed by thread ID — persisted across messages within a conversation. */
+	/** Shared runtime workspaces keyed by thread ID. Used by the active run and its sub-agents. */
 	private readonly sandboxes = new Map<
 		string,
 		{
@@ -643,7 +645,7 @@ export class InstanceAiService {
 		return new BuilderSandboxFactory(config, undefined, this.logger);
 	}
 
-	/** Get or create a sandbox + workspace for a thread. Returns undefined when sandbox is disabled. */
+	/** Get or create the shared runtime sandbox + workspace for a thread. */
 	private async getOrCreateWorkspace(threadId: string, user: User) {
 		const existing = this.sandboxes.get(threadId);
 		if (existing) return existing;
@@ -654,22 +656,21 @@ export class InstanceAiService {
 		const sandbox = await createSandbox(config);
 		const workspace = createWorkspace(sandbox);
 		if (!sandbox || !workspace) return undefined;
+		await workspace.init();
 
 		const entry = { sandbox, workspace };
 		this.sandboxes.set(threadId, entry);
 		return entry;
 	}
 
-	/** Destroy and remove the sandbox for a thread. */
+	/** Destroy and remove the shared runtime workspace for a thread. */
 	private async destroySandbox(threadId: string): Promise<void> {
 		const entry = this.sandboxes.get(threadId);
 		if (!entry?.sandbox) return;
 
 		this.sandboxes.delete(threadId);
 		try {
-			if ('destroy' in entry.sandbox && typeof entry.sandbox.destroy === 'function') {
-				await (entry.sandbox.destroy as () => Promise<void>)();
-			}
+			await entry.workspace?.destroy();
 		} catch (error) {
 			this.logger.warn('Failed to destroy sandbox', {
 				threadId,
@@ -2384,6 +2385,17 @@ export class InstanceAiService {
 
 		const domainTools = createAllTools(context);
 		const sandboxEntry = await this.getOrCreateWorkspace(threadId, user);
+		const runtimeSkills = loadInstanceAiRuntimeSkillSource();
+		const runtimeWorkspaceSkills = sandboxEntry?.workspace
+			? (
+					await materializeRuntimeSkillsIntoWorkspace({
+						source: runtimeSkills,
+						workspace: sandboxEntry.workspace,
+						root: await getWorkspaceRoot(sandboxEntry.workspace),
+						logger: this.logger,
+					})
+				)?.source
+			: undefined;
 
 		const orchestrationContext: OrchestrationContext = {
 			threadId,
@@ -2407,7 +2419,8 @@ export class InstanceAiService {
 				? { name: 'chrome-devtools', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] }
 				: undefined,
 			localMcpServer: context.localMcpServer,
-			runtimeSkills: loadInstanceAiRuntimeSkillSource(),
+			runtimeSkills,
+			runtimeWorkspaceSkills: runtimeWorkspaceSkills ?? runtimeSkills,
 			oauth2CallbackUrl: this.oauth2CallbackUrl,
 			webhookBaseUrl: this.webhookBaseUrl,
 			formBaseUrl: this.formBaseUrl,

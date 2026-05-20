@@ -352,7 +352,7 @@ export async function materializeRuntimeSkillsIntoWorkspace({
 	};
 	attachRuntimeSkillEnvironment(workspace, env);
 
-	logger?.debug('Materialized runtime skills into builder workspace', {
+	logger?.debug('Materialized runtime skills into workspace', {
 		root,
 		skillsRoot: rootDir,
 		registryPath,

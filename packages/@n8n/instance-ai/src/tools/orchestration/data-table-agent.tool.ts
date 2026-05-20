@@ -18,6 +18,7 @@ import {
 	traceSubAgentTools,
 	withTraceContextActor,
 } from './tracing-utils';
+import { attachRuntimeWorkspaceCapabilities } from '../../agent/runtime-workspace';
 import { buildSubAgentBriefing } from '../../agent/sub-agent-briefing';
 import { MAX_STEPS } from '../../constants/max-steps';
 import { consumeStreamWithHitl, requireCompletedHitlText } from '../../stream/consume-with-hitl';
@@ -100,6 +101,10 @@ export function startDataTableAgentTask(
 					})
 					.tool(toolRegistryValues(tracedDataTableTools))
 					.checkpoint(context.checkpointStore ?? 'memory');
+				attachRuntimeWorkspaceCapabilities(subAgent, {
+					workspace: context.workspace,
+					runtimeSkills: context.runtimeWorkspaceSkills,
+				});
 				const telemetry = traceContext?.getTelemetry?.({
 					agentRole: 'data-table-manager',
 					functionId: 'instance-ai.subagent.data-table-manager',

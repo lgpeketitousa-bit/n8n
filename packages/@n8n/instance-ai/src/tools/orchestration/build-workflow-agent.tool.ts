@@ -1437,8 +1437,9 @@ export async function startBuildWorkflowAgentTask(
 							})
 							.tool(toolRegistryValues(tracedBuilderTools))
 							.checkpoint(context.checkpointStore ?? 'memory');
-						if (hasRuntimeSkills(context.runtimeSkills)) {
-							subAgent.skills(context.runtimeSkills);
+						const runtimeSkills = context.runtimeWorkspaceSkills ?? context.runtimeSkills;
+						if (hasRuntimeSkills(runtimeSkills)) {
+							subAgent.skills(runtimeSkills);
 						}
 						const telemetry = traceContext?.getTelemetry?.({
 							agentRole: 'workflow-builder',
