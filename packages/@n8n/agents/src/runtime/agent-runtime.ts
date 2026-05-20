@@ -79,7 +79,10 @@ import type {
 	ToolResultEntry,
 } from '../types/sdk/agent';
 import type { AgentDbMessage, AgentMessage, ContentToolCall, Message } from '../types/sdk/message';
-import { createObservationLogThreadScopeId } from '../types/sdk/observation-log';
+import {
+	createObservationLogThreadScopeId,
+	estimateObservationTokens,
+} from '../types/sdk/observation-log';
 import type { ObservationLogScope } from '../types/sdk/observation-log';
 import type { JSONObject, JSONValue } from '../types/utils/json';
 import { parseWithSchema } from '../utils/parse';
@@ -196,6 +199,37 @@ export interface AgentRuntimeConfig {
 
 const MAX_LOOP_ITERATIONS = 20;
 const logger = createFilteredLogger();
+
+function summarizeMemoryTaskResult(
+	value: unknown,
+	scopeMeta: { scopeKind: string; scopeId: string },
+): Record<string, unknown> {
+	if (value === null || typeof value !== 'object') {
+		return { ...scopeMeta, value };
+	}
+	const result = value as Record<string, unknown>;
+	const pickNumber = (key: string): number | undefined =>
+		typeof result[key] === 'number' ? (result[key] as number) : undefined;
+	const pickBoolean = (key: string): boolean | undefined =>
+		typeof result[key] === 'boolean' ? (result[key] as boolean) : undefined;
+
+	const status = typeof result.status === 'string' ? result.status : 'unknown';
+	const reason = typeof result.reason === 'string' ? result.reason : undefined;
+	const tokenCount = pickNumber('tokenCount');
+	const observationsWritten = pickNumber('observationsWritten');
+	const remainingTokenCount = pickNumber('remainingTokenCount');
+	const overBudgetAfterReflection = pickBoolean('overBudgetAfterReflection');
+
+	return {
+		...scopeMeta,
+		status,
+		...(reason !== undefined ? { reason } : {}),
+		...(tokenCount !== undefined ? { tokenCount } : {}),
+		...(observationsWritten !== undefined ? { observationsWritten } : {}),
+		...(remainingTokenCount !== undefined ? { remainingTokenCount } : {}),
+		...(overBudgetAfterReflection !== undefined ? { overBudgetAfterReflection } : {}),
+	};
+}
 
 const EMPTY_MESSAGE_LIST: SerializedMessageList = {
 	messages: [],
@@ -1520,15 +1554,30 @@ export class AgentRuntime {
 			lockStore: hasObservationLogTaskLockStore(memory) ? memory : undefined,
 			lockTtlMs: observationalMemory.lockTtlMs,
 			onEvent: (event) => {
-				if (event.type !== 'failed') return;
 				const source = event.task.taskKind;
-				const message = `Observation log ${source} task failed`;
-				logger.warn(message, {
-					error: event.error,
+				const scopeMeta = {
 					scopeKind: event.task.scopeKind,
 					scopeId: event.task.scopeId,
-				});
-				this.eventBus.emit({ type: AgentEvent.Error, message, error: event.error, source });
+				};
+
+				if (event.type === 'failed') {
+					const message = `Observation log ${source} task failed`;
+					logger.warn(message, { error: event.error, ...scopeMeta });
+					this.eventBus.emit({ type: AgentEvent.Error, message, error: event.error, source });
+					return;
+				}
+
+				if (event.type === 'skipped') {
+					logger.info(`[observational-memory] ${source} task skipped (lock-held)`, scopeMeta);
+					return;
+				}
+
+				if (event.type === 'completed') {
+					logger.info(
+						`[observational-memory] ${source} task completed`,
+						summarizeMemoryTaskResult(event.value, scopeMeta),
+					);
+				}
 			},
 		});
 		return this.memoryTasks;
@@ -2249,10 +2298,27 @@ export class AgentRuntime {
 			...scope,
 			order: 'asc',
 		});
-		list.observationLogMemory =
-			renderObservationLog(observations, {
+		const rendered = renderObservationLog(observations, {
+			renderTokenBudget: this.config.observationLog?.renderTokenBudget,
+		});
+		list.observationLogMemory = rendered ?? undefined;
+
+		if (rendered) {
+			logger.info('[observational-memory] injected observations into system prompt', {
+				...scope,
+				threadId: options.threadId,
+				activeEntries: observations.length,
+				renderedChars: rendered.length,
+				estimatedTokens: estimateObservationTokens(rendered),
 				renderTokenBudget: this.config.observationLog?.renderTokenBudget,
-			}) ?? undefined;
+			});
+		} else {
+			logger.info('[observational-memory] no observations to inject into system prompt', {
+				...scope,
+				threadId: options.threadId,
+				activeEntries: observations.length,
+			});
+		}
 	}
 
 	/**

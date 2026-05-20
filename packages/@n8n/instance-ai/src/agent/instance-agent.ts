@@ -1,4 +1,4 @@
-import { Agent } from '@n8n/agents';
+import { Agent, Memory, resolveMemoryConfigDefaults } from '@n8n/agents';
 
 import {
 	addSafeMcpTools,
@@ -197,18 +197,38 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 	}
 
 	if (options.memory) {
-		agent.memory({
-			memory: options.memory,
-			lastMessages: memoryConfig.lastMessages ?? 20,
-			...(memoryConfig.embedderModel && memoryConfig.semanticRecallTopK
-				? {
-						semanticRecall: {
-							topK: memoryConfig.semanticRecallTopK,
-							embedder: memoryConfig.embedderModel,
-						},
-					}
-				: {}),
-		});
+		const memoryBuilder = new Memory()
+			.storage(options.memory)
+			.lastMessages(memoryConfig.lastMessages ?? 20);
+
+		if (memoryConfig.embedderModel && memoryConfig.semanticRecallTopK) {
+			memoryBuilder.semanticRecall({
+				topK: memoryConfig.semanticRecallTopK,
+				embedder: memoryConfig.embedderModel,
+			});
+		}
+
+		if (memoryConfig.observerModel) {
+			memoryBuilder.observationalMemory({
+				...(memoryConfig.observerThresholdTokens !== undefined && {
+					observerThresholdTokens: memoryConfig.observerThresholdTokens,
+				}),
+				...(memoryConfig.reflectorThresholdTokens !== undefined && {
+					reflectorThresholdTokens: memoryConfig.reflectorThresholdTokens,
+				}),
+				...(memoryConfig.observationRenderTokenBudget !== undefined && {
+					renderTokenBudget: memoryConfig.observationRenderTokenBudget,
+				}),
+			});
+		}
+
+		const builtMemoryConfig = memoryConfig.observerModel
+			? resolveMemoryConfigDefaults(memoryBuilder.build(), {
+					defaultModel: memoryConfig.observerModel,
+				})
+			: memoryBuilder.build();
+
+		agent.memory(builtMemoryConfig);
 	}
 
 	mergeTraceRunInputs(
@@ -222,6 +242,7 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 				? {
 						lastMessages: memoryConfig.lastMessages ?? 20,
 						semanticRecallTopK: memoryConfig.semanticRecallTopK,
+						hasObservationalMemory: Boolean(memoryConfig.observerModel),
 					}
 				: undefined,
 			toolSearchEnabled: hasDeferrableTools,
