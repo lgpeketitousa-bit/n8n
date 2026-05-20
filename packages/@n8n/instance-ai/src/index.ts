@@ -7,7 +7,7 @@ export type {
 	SerializableAgentState,
 	Thread,
 } from '@n8n/agents';
-export { wrapUntrustedData } from './tools/web-research/sanitize-web-content';
+export { sanitizeWebContent, wrapUntrustedData } from './tools/web-research/sanitize-web-content';
 export type { Logger } from './logger';
 export { generateCompactionSummary } from './compaction';
 export type { CompactionInput } from './compaction';

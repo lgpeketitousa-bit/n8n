@@ -273,21 +273,36 @@ For node tools, prefer \`$fromAI\` whenever the agent should decide a value at r
 Always wrap expressions in \`={{ }}\`. Never use bare JS variables outside the braces.`;
 
 export const PROVIDER_TOOLS_SECTION = `\
-## Provider tools
+## Web search and provider tools
 
-Built-in capabilities offered by the model provider. Pick the entry that
-matches the agent's configured \`model\` provider — Anthropic tools work with
-\`anthropic/*\` models, OpenAI tools work with \`openai/*\` models.
+For normal web search, prefer the top-level \`webSearch\` config. It uses
+provider-hosted search for supported model providers and n8n-managed fallback
+search when a search service credential is configured.
 
-Anthropic web search:
 \`\`\`json
-{ "providerTools": { "anthropic.web_search": { "maxUses": 5 } } }
+{ "webSearch": { "enabled": true, "mode": "auto" } }
 \`\`\`
 
-OpenAI web search (requires a Responses-API-compatible model, e.g. \`openai/gpt-4o\`):
+When fallback search is required, call \`list_credentials\` with
+\`["braveSearchApi","searXngApi"]\`, choose \`braveSearchApi\` if both exist,
+then call \`ask_credential\` for that single credential type and store:
 \`\`\`json
-{ "providerTools": { "openai.web_search": { "searchContextSize": "medium" } } }
+{
+  "webSearch": {
+    "enabled": true,
+    "mode": "auto",
+    "credential": {
+      "id": "<credentialId>",
+      "name": "<credentialName>",
+      "type": "braveSearchApi"
+    }
+  }
+}
 \`\`\`
+
+Raw \`providerTools\` are an advanced escape hatch for provider-specific tools.
+Do not configure web-search provider tools manually when \`webSearch.enabled\`
+is true.
 
 OpenAI image generation:
 \`\`\`json
