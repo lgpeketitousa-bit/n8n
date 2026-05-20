@@ -5,6 +5,7 @@ import type {
 	BuiltMemory,
 	BuiltTool,
 	CheckpointStore,
+	RuntimeSkillSource,
 	Telemetry,
 	Workspace,
 } from '@n8n/agents';
@@ -1034,6 +1035,8 @@ export interface OrchestrationContext {
 	localMcpServer?: LocalMcpServer;
 	/** MCP tools loaded from external servers — available for delegation to sub-agents */
 	mcpTools?: InstanceAiToolRegistry;
+	/** Runtime-loadable skills available to the orchestrator and build-focused sub-agents. */
+	runtimeSkills?: RuntimeSkillSource;
 	/** OAuth2 callback URL for the n8n instance (e.g. http://localhost:5678/rest/oauth2-credential/callback) */
 	oauth2CallbackUrl?: string;
 	/** Webhook base URL for the n8n instance (e.g. http://localhost:5678/webhook) — used to construct webhook URLs for created workflows */

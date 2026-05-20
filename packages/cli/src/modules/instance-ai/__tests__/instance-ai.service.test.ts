@@ -33,6 +33,10 @@ jest.mock('@n8n/instance-ai', () => {
 		),
 		createInstanceAgent: jest.fn(),
 		createAllTools: jest.fn(),
+		loadInstanceAiRuntimeSkillSource: jest.fn(() => ({
+			registry: { skills: [] },
+			loadSkill: jest.fn(),
+		})),
 		InstanceAiTerminalResponseGuard: class {
 			constructor(private readonly options: { runId: string; rootAgentId: string }) {}
 

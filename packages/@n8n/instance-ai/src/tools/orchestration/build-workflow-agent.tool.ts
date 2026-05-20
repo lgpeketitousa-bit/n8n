@@ -31,6 +31,7 @@ import { buildSubAgentBriefing } from '../../agent/sub-agent-briefing';
 import { MAX_STEPS } from '../../constants/max-steps';
 import type { Logger } from '../../logger';
 import type { BuilderSandboxSession } from '../../runtime/builder-sandbox-session-registry';
+import { hasRuntimeSkills } from '../../skills/runtime-skills';
 import { consumeStreamWithHitl, requireCompletedHitlText } from '../../stream/consume-with-hitl';
 import { createToolRegistry, toolRegistryKeys, toolRegistryValues } from '../../tool-registry';
 import { buildAgentTraceInputs, mergeTraceRunInputs } from '../../tracing/langsmith-tracing';
@@ -1150,6 +1151,9 @@ export async function startBuildWorkflowAgentTask(
 								.tool(toolRegistryValues(tracedBuilderTools))
 								.workspace(workspace)
 								.checkpoint(context.checkpointStore ?? 'memory');
+							if (hasRuntimeSkills(context.runtimeSkills)) {
+								subAgent.skills(context.runtimeSkills);
+							}
 							if (builderMemory) {
 								subAgent.memory(builderMemory);
 							}
@@ -1421,6 +1425,9 @@ export async function startBuildWorkflowAgentTask(
 							})
 							.tool(toolRegistryValues(tracedBuilderTools))
 							.checkpoint(context.checkpointStore ?? 'memory');
+						if (hasRuntimeSkills(context.runtimeSkills)) {
+							subAgent.skills(context.runtimeSkills);
+						}
 						const telemetry = traceContext?.getTelemetry?.({
 							agentRole: 'workflow-builder',
 							functionId: 'instance-ai.subagent.workflow-builder',

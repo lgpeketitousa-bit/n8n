@@ -19,6 +19,10 @@ jest.mock('@n8n/instance-ai', () => {
 		handleVerificationVerdict: jest.fn(),
 		createInstanceAgent: jest.fn(),
 		createAllTools: jest.fn(),
+		loadInstanceAiRuntimeSkillSource: jest.fn(() => ({
+			registry: { skills: [] },
+			loadSkill: jest.fn(),
+		})),
 	};
 });
 

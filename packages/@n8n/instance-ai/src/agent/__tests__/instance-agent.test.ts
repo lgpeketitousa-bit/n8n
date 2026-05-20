@@ -3,6 +3,7 @@ const mockAgentInstances: Array<{
 	instructions: jest.Mock;
 	tool: jest.Mock;
 	deferredTool: jest.Mock;
+	skills: jest.Mock;
 	checkpoint: jest.Mock;
 	memory: jest.Mock;
 	telemetry: jest.Mock;
@@ -14,6 +15,7 @@ jest.mock('@n8n/agents', () => ({
 		this.instructions = jest.fn().mockReturnThis();
 		this.tool = jest.fn().mockReturnThis();
 		this.deferredTool = jest.fn().mockReturnThis();
+		this.skills = jest.fn().mockReturnThis();
 		this.checkpoint = jest.fn().mockReturnThis();
 		this.memory = jest.fn().mockReturnThis();
 		this.telemetry = jest.fn().mockReturnThis();
@@ -266,6 +268,51 @@ describe('createInstanceAgent', () => {
 		} as never);
 
 		expect(mockAgentInstances[0]?.telemetry).toHaveBeenCalledWith(telemetry);
+	});
+
+	it('attaches runtime skills to the orchestrator when provided by the context', async () => {
+		const runtimeSkills = {
+			registry: {
+				schemaVersion: 1,
+				skillsHash: 'skills-hash',
+				skills: [
+					{
+						id: 'workflow-auditor',
+						name: 'workflow-auditor',
+						description: 'Audit workflows.',
+						hash: 'skill-hash',
+						linkedFiles: {
+							references: [],
+							templates: [],
+							scripts: [],
+							assets: [],
+							examples: [],
+							other: [],
+						},
+					},
+				],
+			},
+			loadSkill: jest.fn(),
+		};
+
+		await createInstanceAgent({
+			modelId: 'test-model',
+			context: {
+				runLabel: 'skills-test',
+				localGatewayStatus: undefined,
+				licenseHints: undefined,
+				localMcpServer: undefined,
+			},
+			orchestrationContext: {
+				runId: 'skills-test',
+				browserMcpConfig: undefined,
+				runtimeSkills,
+			},
+			memoryConfig: { lastMessages: 20 },
+			mcpManager: createMcpManagerStub(),
+		} as never);
+
+		expect(mockAgentInstances[0]?.skills).toHaveBeenCalledWith(runtimeSkills);
 	});
 
 	it('exposes browser_connect and browser_navigate from localMcpServer in the agent toolset', async () => {

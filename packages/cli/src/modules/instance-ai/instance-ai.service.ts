@@ -33,6 +33,7 @@ import {
 	continueInstanceAiTraceContext,
 	createInstanceAiLivenessPolicyConfig,
 	InstanceAiLivenessPolicy,
+	loadInstanceAiRuntimeSkillSource,
 	McpClientManager,
 	BuilderSandboxFactory,
 	SnapshotManager,
@@ -2406,6 +2407,7 @@ export class InstanceAiService {
 				? { name: 'chrome-devtools', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] }
 				: undefined,
 			localMcpServer: context.localMcpServer,
+			runtimeSkills: loadInstanceAiRuntimeSkillSource(),
 			oauth2CallbackUrl: this.oauth2CallbackUrl,
 			webhookBaseUrl: this.webhookBaseUrl,
 			formBaseUrl: this.formBaseUrl,

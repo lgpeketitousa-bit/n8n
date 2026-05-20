@@ -6,6 +6,7 @@ import {
 	type McpToolNameValidationError,
 } from './mcp-tool-name-validation';
 import { getSystemPrompt } from './system-prompt';
+import { hasRuntimeSkills } from '../skills/runtime-skills';
 import {
 	createToolRegistry,
 	filterToolRegistry,
@@ -176,6 +177,10 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 		.checkpoint(options.checkpointStore ?? 'memory');
 	if (hasDeferrableTools) {
 		agent.deferredTool(toolRegistryValues(deferredTools), { search: { topK: 5 } });
+	}
+	const runtimeSkills = orchestrationContext?.runtimeSkills;
+	if (hasRuntimeSkills(runtimeSkills)) {
+		agent.skills(runtimeSkills);
 	}
 	if (telemetry) {
 		agent.telemetry(telemetry);

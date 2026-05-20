@@ -44,6 +44,11 @@ export type {
 export { createInstanceAgent } from './agent/instance-agent';
 export { createSubAgent } from './agent/sub-agent-factory';
 export type { SubAgentOptions } from './agent/sub-agent-factory';
+export {
+	INSTANCE_AI_SKILLS_DIR,
+	hasRuntimeSkills,
+	loadInstanceAiRuntimeSkillSource,
+} from './skills/runtime-skills';
 export { createAllTools, createOrchestrationTools } from './tools';
 export { startBuildWorkflowAgentTask } from './tools/orchestration/build-workflow-agent.tool';
 export {

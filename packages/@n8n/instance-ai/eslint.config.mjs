@@ -2,7 +2,7 @@ import { defineConfig } from 'eslint/config';
 import { baseConfig } from '@n8n/eslint-config/base';
 
 export default defineConfig(baseConfig, {
-	ignores: ['scripts/**/*.cjs'],
+	ignores: ['scripts/**/*.cjs', 'skills/**/*.mjs'],
 }, {
 	rules: {
 		// Tool names may be kebab-case identifiers (e.g. 'list-workflows'), which
