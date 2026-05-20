@@ -343,7 +343,7 @@ export class AgentScheduleService {
 				memory: {
 					threadId,
 					resourceId: executionUserId,
-					episodicMemoryResourceId: scheduledRunEpisodicMemoryResourceId(threadId),
+					episodicMemoryResourceId: scheduledRunEpisodicMemoryResourceId(executionUserId),
 				},
 			})) {
 				chunkCount += 1;

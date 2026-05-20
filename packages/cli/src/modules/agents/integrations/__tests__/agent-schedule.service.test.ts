@@ -234,7 +234,7 @@ describe('AgentScheduleService', () => {
 		);
 	});
 
-	it('runScheduled appends the timestamp and uses a fresh thread/resource id', async () => {
+	it('runScheduled appends the timestamp and uses a fresh thread with stable schedule episodic memory', async () => {
 		const agent = makePublishedAgent([
 			{
 				type: 'schedule',
@@ -258,7 +258,7 @@ describe('AgentScheduleService', () => {
 				memory: {
 					threadId: expect.stringMatching(/^schedule-agent-1-/),
 					resourceId: 'user-1',
-					episodicMemoryResourceId: expect.stringMatching(/^schedule:schedule-agent-1-/),
+					episodicMemoryResourceId: 'schedule:user-1',
 				},
 			}),
 		);

@@ -2,8 +2,8 @@ export function draftChatEpisodicMemoryResourceId(userId: string): string {
 	return `draft-chat:${userId}`;
 }
 
-export function scheduledRunEpisodicMemoryResourceId(threadId: string): string {
-	return `schedule:${threadId}`;
+export function scheduledRunEpisodicMemoryResourceId(executionUserId: string): string {
+	return `schedule:${executionUserId}`;
 }
 
 export function integrationEpisodicMemoryResourceId(
