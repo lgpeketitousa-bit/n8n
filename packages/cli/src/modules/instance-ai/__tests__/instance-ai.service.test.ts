@@ -14,6 +14,7 @@ jest.mock('@n8n/instance-ai', () => {
 		SnapshotManager: class {},
 		createSandbox: jest.fn(),
 		createWorkspace: jest.fn(),
+		setupSandboxWorkspace: jest.fn(),
 		workflowBuildOutcomeSchema: z.object({}),
 		handleBuildOutcome: jest.fn(),
 		handleVerificationVerdict: jest.fn(),

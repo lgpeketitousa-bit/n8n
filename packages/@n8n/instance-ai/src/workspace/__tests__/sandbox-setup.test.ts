@@ -24,7 +24,7 @@ function createSetupContext(): InstanceAiContext {
 }
 
 function createLocalWorkspace(
-	writeFile: jest.Mock<Promise<void>, [string, string, { recursive?: boolean }?]>,
+	writeFile: jest.Mock<Promise<void>, [string, string | Buffer, { recursive?: boolean }?]>,
 	mkdir?: jest.Mock<Promise<void>, [string, { recursive?: boolean }?]>,
 ): SandboxWorkspace {
 	return {
@@ -131,7 +131,7 @@ describe('setupSandboxWorkspace', () => {
 			runInSandbox,
 			readFileViaSandbox,
 		);
-		const writeFile = jest.fn<Promise<void>, [string, string, { recursive?: boolean }?]>(
+		const writeFile = jest.fn<Promise<void>, [string, string | Buffer, { recursive?: boolean }?]>(
 			async () => {},
 		);
 
@@ -161,7 +161,7 @@ describe('setupSandboxWorkspace', () => {
 			runInSandbox,
 			readFileViaSandbox,
 		);
-		const writeFile = jest.fn<Promise<void>, [string, string, { recursive?: boolean }?]>(
+		const writeFile = jest.fn<Promise<void>, [string, string | Buffer, { recursive?: boolean }?]>(
 			async () => {},
 		);
 		const mkdir = jest.fn<Promise<void>, [string, { recursive?: boolean }?]>(async () => {});
@@ -190,7 +190,7 @@ describe('setupSandboxWorkspace', () => {
 			runInSandbox,
 			readFileViaSandbox,
 		);
-		const writeFile = jest.fn<Promise<void>, [string, string, { recursive?: boolean }?]>(
+		const writeFile = jest.fn<Promise<void>, [string, string | Buffer, { recursive?: boolean }?]>(
 			async () => {},
 		);
 
@@ -216,7 +216,7 @@ describe('setupSandboxWorkspace', () => {
 			runInSandbox,
 			readFileViaSandbox,
 		);
-		const writeFile = jest.fn<Promise<void>, [string, string, { recursive?: boolean }?]>(
+		const writeFile = jest.fn<Promise<void>, [string, string | Buffer, { recursive?: boolean }?]>(
 			async () => {},
 		);
 

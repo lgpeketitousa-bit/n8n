@@ -7,7 +7,6 @@ import {
 import { UserError } from 'n8n-workflow';
 
 import { executeTool } from '../../../__tests__/tool-test-utils';
-import type { BuilderSandboxSession } from '../../../runtime/builder-sandbox-session-registry';
 import { createToolRegistry } from '../../../tool-registry';
 import type { OrchestrationContext, InstanceAiContext } from '../../../types';
 import { createRemediation } from '../../../workflow-loop';
@@ -125,22 +124,20 @@ describe('buildWarmBuilderFollowUp', () => {
 });
 
 describe('getBuilderSessionMemory', () => {
-	const session = { sessionId: 'builder-session-1' } as BuilderSandboxSession;
-
-	it('uses memory for retained builder sessions', () => {
+	it('uses memory when the builder runs in the shared workspace', () => {
 		const memory = {} as OrchestrationContext['memory'];
 
-		expect(getBuilderSessionMemory({ memory }, session)).toBe(memory);
+		expect(getBuilderSessionMemory({ memory }, true)).toBe(memory);
 	});
 
-	it('skips memory when there is no retained builder session', () => {
+	it('skips memory when the builder falls back to tool mode', () => {
 		const memory = {} as OrchestrationContext['memory'];
 
-		expect(getBuilderSessionMemory({ memory }, undefined)).toBeUndefined();
+		expect(getBuilderSessionMemory({ memory }, false)).toBeUndefined();
 	});
 
 	it('skips memory when the context has no memory store', () => {
-		expect(getBuilderSessionMemory({}, session)).toBeUndefined();
+		expect(getBuilderSessionMemory({}, true)).toBeUndefined();
 	});
 });
 

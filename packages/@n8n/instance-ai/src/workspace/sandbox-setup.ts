@@ -26,7 +26,11 @@ import { createRequire } from 'node:module';
 
 import type { Logger } from '../logger';
 import type { InstanceAiContext, SearchableNodeDescription } from '../types';
-import { isLinkWorkspaceSdkEnabled } from './pack-workspace-sdk';
+import {
+	isLinkWorkspaceSdkEnabled,
+	packWorkspaceSdk,
+	type WorkspaceSdkTarball,
+} from './pack-workspace-sdk';
 import {
 	runInSandbox,
 	readFileViaSandbox,
@@ -36,6 +40,12 @@ import {
 } from './sandbox-fs';
 
 const hostRequire = createRequire(__filename);
+const NOOP_LOGGER: Logger = {
+	info: () => {},
+	warn: () => {},
+	error: () => {},
+	debug: () => {},
+};
 
 export const WORKSPACE_DIR = 'workspace';
 
@@ -161,6 +171,57 @@ function buildLocalProviderPackageJson(): string {
 	const sdkPath = resolveHostDepPath('@n8n/workflow-sdk');
 	if (!sdkPath) return PACKAGE_JSON;
 	return buildPackageJson(`file:${sdkPath}`);
+}
+
+function getSandboxProvider(workspace: SandboxWorkspace): string | undefined {
+	return workspace.filesystem?.provider ?? workspace.sandbox?.provider;
+}
+
+function buildWorkspacePackageJson(workspace: SandboxWorkspace): string {
+	return getSandboxProvider(workspace) === 'local' ? buildLocalProviderPackageJson() : PACKAGE_JSON;
+}
+
+let sdkTarballPromise: Promise<WorkspaceSdkTarball | null> | null = null;
+
+export async function linkWorkspaceSdkIfEnabled(
+	workspace: SandboxWorkspace,
+	root: string,
+	logger?: Logger,
+): Promise<void> {
+	if (!isLinkWorkspaceSdkEnabled() || getSandboxProvider(workspace) === 'local') return;
+
+	sdkTarballPromise ??= packWorkspaceSdk(logger ?? NOOP_LOGGER);
+	const packed = await sdkTarballPromise;
+	if (!packed) {
+		throw new Error(
+			'N8N_INSTANCE_AI_SANDBOX_LINK_SDK is enabled, but the workspace SDK could not be packed. Run `pnpm build` in packages/@n8n/workflow-sdk or unset N8N_INSTANCE_AI_SANDBOX_LINK_SDK.',
+		);
+	}
+
+	const remotePath = `${root}/${packed.filename}`;
+	if (workspace.filesystem) {
+		await workspace.filesystem.writeFile(remotePath, packed.tarball, { recursive: true });
+	} else {
+		await writeFileViaSandbox(workspace, remotePath, packed.tarball);
+	}
+
+	const install = await runInSandbox(
+		workspace,
+		`npm install '${escapeSingleQuotes(remotePath)}' --no-save --ignore-scripts --force`,
+		root,
+	);
+	if (install.exitCode !== 0) {
+		logger?.error('Failed to link workspace SDK into sandbox', {
+			exitCode: install.exitCode,
+			stderr: install.stderr,
+		});
+		throw new Error(`Failed to install workspace SDK tarball: ${install.stderr}`);
+	}
+
+	logger?.info('Linked workspace SDK into sandbox', {
+		version: packed.version,
+		sdkPath: packed.sdkPath,
+	});
 }
 
 /**
@@ -365,7 +426,7 @@ export async function setupSandboxWorkspace(
 	// its workspace location via `file:` — this makes SDK changes visible in
 	// the sandbox after `pnpm build`, without a publish. Daytona/n8n-sandbox
 	// stay on the registry-pinned PACKAGE_JSON (they can't see the host FS).
-	files.set('package.json', buildLocalProviderPackageJson());
+	files.set('package.json', buildWorkspacePackageJson(workspace));
 	files.set('tsconfig.json', TSCONFIG_JSON);
 	files.set('build.mjs', BUILD_MJS);
 
@@ -402,6 +463,8 @@ export async function setupSandboxWorkspace(
 	if (npmResult.exitCode !== 0) {
 		throw new Error(`Sandbox npm install failed: ${npmResult.stderr}`);
 	}
+
+	await linkWorkspaceSdkIfEnabled(workspace, root, context.logger);
 
 	await writeWorkspaceFiles(
 		workspace,

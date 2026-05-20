@@ -30,8 +30,6 @@ import { createVerifyBuiltWorkflowTool } from './verify-built-workflow.tool';
 import { buildSubAgentBriefing } from '../../agent/sub-agent-briefing';
 import { MAX_STEPS } from '../../constants/max-steps';
 import type { Logger } from '../../logger';
-import type { BuilderSandboxSession } from '../../runtime/builder-sandbox-session-registry';
-import { materializeRuntimeSkillsIntoWorkspace } from '../../skills/materialize-runtime-skills';
 import { hasRuntimeSkills } from '../../skills/runtime-skills';
 import { consumeStreamWithHitl, requireCompletedHitlText } from '../../stream/consume-with-hitl';
 import { createToolRegistry, toolRegistryKeys, toolRegistryValues } from '../../tool-registry';
@@ -52,7 +50,6 @@ import {
 	type WorkflowVerificationReadiness,
 	type WorkflowLoopState,
 } from '../../workflow-loop';
-import type { BuilderWorkspace } from '../../workspace/builder-sandbox-factory';
 import { readFileViaSandbox } from '../../workspace/sandbox-fs';
 import { getWorkspaceRoot } from '../../workspace/sandbox-setup';
 import {
@@ -78,9 +75,9 @@ interface BuilderMemoryBinding {
 
 export function getBuilderSessionMemory(
 	context: Pick<OrchestrationContext, 'memory'>,
-	activeBuilderSession: BuilderSandboxSession | undefined,
+	useSharedWorkspace: boolean,
 ): OrchestrationContext['memory'] {
-	return activeBuilderSession ? context.memory : undefined;
+	return useSharedWorkspace ? context.memory : undefined;
 }
 
 function toToolRegistry(tools: readonly BuiltTool[]): InstanceAiToolRegistry {
@@ -745,7 +742,6 @@ async function getLatestBuildOutcome(
 async function compactSuccessfulBuilderMemory(input: {
 	context: OrchestrationContext;
 	binding: BuilderMemoryBinding;
-	activeBuilderSession: BuilderSandboxSession | undefined;
 	domainContext: InstanceAiContext | undefined;
 	workflowId: string | undefined;
 	workItemId: string;
@@ -766,7 +762,6 @@ async function compactSuccessfulBuilderMemory(input: {
 		await compactBuilderMemoryThread({
 			context: input.context,
 			binding: input.binding,
-			sessionId: input.activeBuilderSession?.sessionId,
 			workflowId: input.workflowId,
 			workItemId: input.workItemId,
 			sourceFilePath: input.mainWorkflowPath,
@@ -873,9 +868,9 @@ export async function startBuildWorkflowAgentTask(
 	}
 	const spawnBackgroundTask = context.spawnBackgroundTask;
 
-	const factory = context.builderSandboxFactory;
+	const sharedWorkspace = context.workspace;
 	const domainContext = context.domainContext;
-	const useSandbox = !!factory && !!domainContext;
+	const useSandbox = !!sharedWorkspace && !!domainContext;
 
 	let builderTools: InstanceAiToolRegistry;
 	let prompt = BUILDER_AGENT_PROMPT;
@@ -928,15 +923,9 @@ export async function startBuildWorkflowAgentTask(
 		(input.workflowId ? `${context.runId}:default` : `wi_${nanoid(8)}`);
 
 	const { workflowId } = input;
-	const reusedBuilderSession =
-		useSandbox && workflowId
-			? context.builderSandboxSessionRegistry?.acquireByWorkflowId(context.threadId, workflowId)
-			: undefined;
-	const workItemId = reusedBuilderSession?.workItemId ?? baseWorkItemId;
-	const builderThreadId = reusedBuilderSession?.builderThreadId ?? randomUUID();
-	const builderResourceId =
-		reusedBuilderSession?.builderResourceId ??
-		createSubAgentResourceId(context.threadId, 'workflow-builder');
+	const workItemId = baseWorkItemId;
+	const builderThreadId = randomUUID();
+	const builderResourceId = createSubAgentResourceId(context.threadId, 'workflow-builder');
 	const builderMemoryBinding: BuilderMemoryBinding = {
 		resource: builderResourceId,
 		thread: builderThreadId,
@@ -944,9 +933,7 @@ export async function startBuildWorkflowAgentTask(
 
 	// Build additional context based on sandbox mode and existing workflow
 	let additionalContext = '';
-	if (reusedBuilderSession && workflowId) {
-		additionalContext = '';
-	} else if (useSandbox && workflowId) {
+	if (useSandbox && workflowId) {
 		additionalContext = `[CONTEXT: Modifying existing workflow ${workflowId}. The current code is pre-loaded in ~/workspace/src/workflow.ts — read it first, then edit. Use workflowId "${workflowId}" when calling submit-workflow.]\n\n[WORK ITEM ID: ${workItemId}]`;
 	} else if (useSandbox) {
 		additionalContext = `[WORK ITEM ID: ${workItemId}]`;
@@ -955,28 +942,20 @@ export async function startBuildWorkflowAgentTask(
 	}
 
 	const runningTaskSummaries = context.getRunningTaskSummaries?.();
-	const briefing =
-		reusedBuilderSession && workflowId
-			? buildWarmBuilderFollowUp({
-					task: input.task,
-					conversationContext: input.conversationContext,
-					workflowId,
-					workItemId,
-				})
-			: await buildSubAgentBriefing({
-					task: input.task,
-					conversationContext: input.conversationContext,
-					additionalContext: additionalContext || undefined,
-					requirements: useSandbox ? DETACHED_BUILDER_REQUIREMENTS : undefined,
-					iteration: context.iterationLog
-						? {
-								log: context.iterationLog,
-								threadId: context.threadId,
-								taskKey: `build:${workflowId ?? 'new'}`,
-							}
-						: undefined,
-					runningTasks: runningTaskSummaries,
-				});
+	const briefing = await buildSubAgentBriefing({
+		task: input.task,
+		conversationContext: input.conversationContext,
+		additionalContext: additionalContext || undefined,
+		requirements: useSandbox ? DETACHED_BUILDER_REQUIREMENTS : undefined,
+		iteration: context.iterationLog
+			? {
+					log: context.iterationLog,
+					threadId: context.threadId,
+					taskKey: `build:${workflowId ?? 'new'}`,
+				}
+			: undefined,
+		runningTasks: runningTaskSummaries,
+	});
 	const detachedTraceFactory = createDetachedSubAgentTraceFactory(context, {
 		agentId: subAgentId,
 		role: 'workflow-builder',
@@ -990,486 +969,167 @@ export async function startBuildWorkflowAgentTask(
 			conversationContext: input.conversationContext,
 		},
 	});
-	const createTraceContext = async () => {
-		try {
-			return await detachedTraceFactory();
-		} catch (error) {
-			if (reusedBuilderSession) {
-				void context.builderSandboxSessionRegistry?.release(reusedBuilderSession.sessionId, {
-					keep: true,
-					reason: 'trace_setup_failed',
-				});
-			}
-			throw error;
-		}
-	};
+	const createTraceContext = async () => await detachedTraceFactory();
 
-	let spawnOutcome: ReturnType<typeof spawnBackgroundTask>;
-	try {
-		spawnOutcome = spawnBackgroundTask({
-			taskId,
-			threadId: context.threadId,
-			agentId: subAgentId,
+	const spawnOutcome = spawnBackgroundTask({
+		taskId,
+		threadId: context.threadId,
+		agentId: subAgentId,
+		role: 'workflow-builder',
+		createTraceContext,
+		plannedTaskId: input.plannedTaskId,
+		workItemId,
+		dedupeKey: {
 			role: 'workflow-builder',
-			createTraceContext,
 			plannedTaskId: input.plannedTaskId,
-			workItemId,
-			dedupeKey: {
-				role: 'workflow-builder',
-				plannedTaskId: input.plannedTaskId,
-				workflowId: input.workflowId,
-			},
-			// When the orchestrator spawns a builder inside a checkpoint follow-up
-			// (e.g. to patch a runtime bug the verify exposed), tag the task so the
-			// safety net doesn't pre-emptively fail the checkpoint and the
-			// settlement path can re-enter the checkpoint context instead of a
-			// bare background-task-completed shell.
-			parentCheckpointId:
-				context.isCheckpointFollowUp === true ? context.checkpointTaskId : undefined,
-			run: async (
-				signal,
-				drainCorrections,
-				waitForCorrection,
-				{ traceContext },
-			): Promise<BackgroundTaskResult> =>
-				await withTraceContextActor(traceContext, async () => {
-					let builderWs: BuilderWorkspace | undefined;
-					let activeBuilderSession: BuilderSandboxSession | undefined = reusedBuilderSession;
-					const submitAttempts = new Map<string, SubmitWorkflowAttempt>();
-					// Append-only history so a later failed submit for the main path
-					// cannot mask an earlier successful submit during post-error recovery.
-					const submitAttemptHistory: SubmitWorkflowAttempt[] = [];
-					try {
-						if (useSandbox) {
-							let workspace: BuilderWorkspace['workspace'];
-							let root: string;
-							if (activeBuilderSession) {
-								workspace = activeBuilderSession.workspace;
-								root = activeBuilderSession.root;
-							} else {
-								builderWs = await factory.create(subAgentId, domainContext);
-								workspace = builderWs.workspace;
-								root = await getWorkspaceRoot(workspace);
-							}
+			workflowId: input.workflowId,
+		},
+		// When the orchestrator spawns a builder inside a checkpoint follow-up
+		// (e.g. to patch a runtime bug the verify exposed), tag the task so the
+		// safety net doesn't pre-emptively fail the checkpoint and the
+		// settlement path can re-enter the checkpoint context instead of a
+		// bare background-task-completed shell.
+		parentCheckpointId:
+			context.isCheckpointFollowUp === true ? context.checkpointTaskId : undefined,
+		run: async (
+			signal,
+			drainCorrections,
+			waitForCorrection,
+			{ traceContext },
+		): Promise<BackgroundTaskResult> =>
+			await withTraceContextActor(traceContext, async () => {
+				const submitAttempts = new Map<string, SubmitWorkflowAttempt>();
+				// Append-only history so a later failed submit for the main path
+				// cannot mask an earlier successful submit during post-error recovery.
+				const submitAttemptHistory: SubmitWorkflowAttempt[] = [];
+				if (useSandbox && sharedWorkspace && domainContext) {
+					const workspace = sharedWorkspace;
+					const root = await getWorkspaceRoot(workspace);
+					const runtimeSkills = context.runtimeWorkspaceSkills ?? context.runtimeSkills;
 
-							const materializedRuntimeSkills = hasRuntimeSkills(context.runtimeSkills)
-								? await materializeRuntimeSkillsIntoWorkspace({
-										source: context.runtimeSkills,
-										workspace,
-										root,
-										logger: context.logger,
-									})
-								: undefined;
-							const runtimeSkills = materializedRuntimeSkills?.source ?? context.runtimeSkills;
+					prompt = createSandboxBuilderAgentPrompt(root);
 
-							prompt = createSandboxBuilderAgentPrompt(root);
-							if (!activeBuilderSession && builderWs) {
-								activeBuilderSession = context.builderSandboxSessionRegistry?.create({
-									threadId: context.threadId,
-									workflowId,
-									workItemId,
-									builderThreadId,
-									builderResourceId,
-									builderWorkspace: builderWs,
-									root,
+					if (workflowId) {
+						try {
+							const json = await domainContext.workflowService.getAsWorkflowJSON(workflowId);
+							const rawCode = generateWorkflowCode(json);
+							const code = `${SDK_IMPORT_STATEMENT}\n\n${rawCode}`;
+							if (workspace.filesystem) {
+								await workspace.filesystem.writeFile(`${root}/src/workflow.ts`, code, {
+									recursive: true,
 								});
 							}
+						} catch {
+							// Non-fatal — agent can still build from scratch
+						}
+					} else if (workspace.filesystem) {
+						await workspace.filesystem.writeFile(
+							`${root}/src/workflow.ts`,
+							`${SDK_IMPORT_STATEMENT}\n\n`,
+							{ recursive: true },
+						);
+					}
 
-							if (!reusedBuilderSession && workflowId && domainContext) {
-								try {
-									const json = await domainContext.workflowService.getAsWorkflowJSON(workflowId);
-									const rawCode = generateWorkflowCode(json);
-									const code = `${SDK_IMPORT_STATEMENT}\n\n${rawCode}`;
-									if (workspace.filesystem) {
-										await workspace.filesystem.writeFile(`${root}/src/workflow.ts`, code, {
-											recursive: true,
-										});
-									}
-								} catch {
-									// Non-fatal — agent can still build from scratch
+					const mainWorkflowPath = `${root}/src/workflow.ts`;
+					builderTools.set(
+						'submit-workflow',
+						createIdentityEnforcedSubmitWorkflowTool({
+							context: domainContext,
+							workspace,
+							credentialMap: credMap,
+							root,
+							currentRunId: context.runId,
+							getWorkflowLoopState: async () =>
+								await context.workflowTaskService?.getWorkflowLoopState(workItemId),
+							onGuardFired: (event) => {
+								context.trackTelemetry?.('Builder remediation guard fired', {
+									thread_id: context.threadId,
+									run_id: context.runId,
+									work_item_id: workItemId,
+									workflow_id: event.workflowId,
+									category: event.category,
+									attempt_count: event.attemptCount,
+									reason: event.reason,
+								});
+							},
+							onAttempt: async (attempt) => {
+								submitAttempts.set(attempt.filePath, attempt);
+								submitAttemptHistory.push(attempt);
+								if (attempt.filePath !== mainWorkflowPath) {
+									return;
 								}
-							}
-
-							const mainWorkflowPath = `${root}/src/workflow.ts`;
-							builderTools.set(
-								'submit-workflow',
-								createIdentityEnforcedSubmitWorkflowTool({
-									context: domainContext,
-									workspace,
-									credentialMap: credMap,
-									root,
-									currentRunId: context.runId,
-									getWorkflowLoopState: async () =>
-										await context.workflowTaskService?.getWorkflowLoopState(workItemId),
-									onGuardFired: (event) => {
-										context.trackTelemetry?.('Builder remediation guard fired', {
-											thread_id: context.threadId,
-											run_id: context.runId,
-											work_item_id: workItemId,
-											workflow_id: event.workflowId,
-											category: event.category,
-											attempt_count: event.attemptCount,
-											reason: event.reason,
-										});
-									},
-									onAttempt: async (attempt) => {
-										submitAttempts.set(attempt.filePath, attempt);
-										submitAttemptHistory.push(attempt);
-										if (attempt.filePath !== mainWorkflowPath) {
-											return;
-										}
-										if (attempt.success && attempt.workflowId && activeBuilderSession) {
-											context.builderSandboxSessionRegistry?.aliasWorkflowId(
-												activeBuilderSession.sessionId,
-												attempt.workflowId,
-											);
-										}
-										if (!context.workflowTaskService) {
-											return;
-										}
-
-										await context.workflowTaskService.reportBuildOutcome(
-											buildOutcome(
-												workItemId,
-												context.runId,
-												taskId,
-												attempt,
-												attempt.success
-													? 'Workflow submitted and ready for verification.'
-													: (attempt.errors?.join(' ') ?? 'Workflow submission failed.'),
-											),
-										);
-									},
-								}),
-							);
-
-							const tracedBuilderTools = traceSubAgentTools(
-								context,
-								builderTools,
-								'workflow-builder',
-							);
-							const runtimeWorkspaceTools = toToolRegistry(workspace.getTools());
-							const builderMemory = getBuilderSessionMemory(context, activeBuilderSession);
-							const shouldUseBuilderMemory = Boolean(builderMemory);
-
-							const subAgent = new Agent('Workflow Builder Agent')
-								.model(context.modelId)
-								.instructions(prompt, {
-									providerOptions: {
-										anthropic: { cacheControl: { type: 'ephemeral' } },
-									},
-								})
-								.tool(toolRegistryValues(tracedBuilderTools))
-								.workspace(workspace)
-								.checkpoint(context.checkpointStore ?? 'memory');
-							if (hasRuntimeSkills(runtimeSkills)) {
-								subAgent.skills(runtimeSkills);
-							}
-							if (builderMemory) {
-								subAgent.memory(builderMemory);
-							}
-							const telemetry = traceContext?.getTelemetry?.({
-								agentRole: 'workflow-builder',
-								functionId: 'instance-ai.subagent.workflow-builder',
-								executionMode: 'background_subagent',
-								metadata: { agent_id: subAgentId, task_id: taskId },
-							});
-							if (telemetry) {
-								subAgent.telemetry(telemetry);
-							}
-							mergeTraceRunInputs(
-								traceContext?.actorRun,
-								buildAgentTraceInputs({
-									systemPrompt: prompt,
-									tools: tracedBuilderTools,
-									runtimeTools: runtimeWorkspaceTools,
-									runtimeSkills: runtimeSkills?.registry,
-									modelId: context.modelId,
-								}),
-							);
-
-							let finalText: string;
-							try {
-								const persistence = await createSubAgentPersistence(context, {
-									agentKind: 'workflow-builder',
-									threadId: builderThreadId,
-									resourceId: builderResourceId,
-								});
-								const resumeOptions: Record<string, unknown> = {
-									providerOptions: {
-										anthropic: { cacheControl: { type: 'ephemeral' } },
-									},
-								};
-								const stream = await subAgent.stream(briefing, {
-									maxIterations: MAX_STEPS.BUILDER,
-									abortSignal: signal,
-									persistence,
-									providerOptions: {
-										anthropic: { cacheControl: { type: 'ephemeral' } },
-									},
-								});
-
-								const hitlResult = await consumeStreamWithHitl({
-									agent: subAgent,
-									stream,
-									runId: context.runId,
-									agentId: subAgentId,
-									eventBus: context.eventBus,
-									logger: context.logger,
-									threadId: context.threadId,
-									abortSignal: signal,
-									waitForConfirmation: context.waitForConfirmation,
-									drainCorrections,
-									waitForCorrection,
-									maxIterations: MAX_STEPS.BUILDER,
-									resumeOptions,
-									persistence,
-								});
-
-								finalText = await requireCompletedHitlText(
-									hitlResult,
-									'Workflow builder sub-agent',
-								);
-							} catch (error) {
-								const recovered = resultFromPostStreamError({
-									error,
-									submitAttempts: submitAttemptHistory,
-									mainWorkflowPath,
-									workItemId,
-									runId: context.runId,
-									taskId,
-								});
-								if (recovered) {
-									await promoteMainWorkflow(
-										domainContext,
-										context.logger,
-										recovered.outcome.workflowId,
-									);
-									return await finalizeBuildResult(context, workItemId, recovered);
-								}
-								throw error;
-							}
-
-							const mainWorkflowAttempt = submitAttempts.get(mainWorkflowPath);
-							const currentMainWorkflow = await readFileViaSandbox(workspace, mainWorkflowPath);
-							const currentMainWorkflowHash = hashContent(currentMainWorkflow);
-
-							if (!mainWorkflowAttempt) {
-								const text =
-									'Error: workflow builder finished without submitting /src/workflow.ts.';
-								return {
-									text,
-									outcome: buildOutcome(workItemId, context.runId, taskId, undefined, text),
-								};
-							}
-
-							if (!mainWorkflowAttempt.success) {
-								const recovered = resultFromLaterFailedMainSubmit({
-									failedAttempt: mainWorkflowAttempt,
-									submitAttempts: submitAttemptHistory,
-									mainWorkflowPath,
-									workItemId,
-									runId: context.runId,
-									taskId,
-								});
-								if (recovered) {
-									await promoteMainWorkflow(
-										domainContext,
-										context.logger,
-										recovered.outcome.workflowId,
-									);
-									return await finalizeBuildResult(context, workItemId, recovered);
+								if (!context.workflowTaskService) {
+									return;
 								}
 
-								const errorText =
-									mainWorkflowAttempt.errors?.join(' ') ?? 'Unknown submit-workflow failure.';
-								const text = `Error: workflow builder stopped after a failed submit-workflow for /src/workflow.ts. ${errorText}`;
-								return {
-									text,
-									outcome: buildOutcome(
+								await context.workflowTaskService.reportBuildOutcome(
+									buildOutcome(
 										workItemId,
 										context.runId,
 										taskId,
-										mainWorkflowAttempt,
-										text,
+										attempt,
+										attempt.success
+											? 'Workflow submitted and ready for verification.'
+											: (attempt.errors?.join(' ') ?? 'Workflow submission failed.'),
 									),
-								};
-							}
+								);
+							},
+						}),
+					);
 
-							if (mainWorkflowAttempt.sourceHash !== currentMainWorkflowHash) {
-								// Builder edited the file after its last submit — auto-re-submit
-								// instead of discarding the agent's work.
-								const submitTool = tracedBuilderTools.get('submit-workflow');
-								if (submitTool?.handler) {
-									const resubmit = (await submitTool.handler(
-										{
-											filePath: mainWorkflowPath,
-											workflowId: mainWorkflowAttempt.workflowId,
-										},
-										{},
-									)) as SubmitWorkflowOutput;
+					const tracedBuilderTools = traceSubAgentTools(context, builderTools, 'workflow-builder');
+					const runtimeWorkspaceTools = toToolRegistry(workspace.getTools());
+					const builderMemory = getBuilderSessionMemory(context, true);
+					const shouldUseBuilderMemory = Boolean(builderMemory);
 
-									const refreshedAttempt = attemptFromAutoResubmit({
-										latestAttempt: submitAttempts.get(mainWorkflowPath),
-										resubmit,
-										filePath: mainWorkflowPath,
-										sourceHash: currentMainWorkflowHash,
-									});
-									if (resubmit.success && refreshedAttempt?.success) {
-										await promoteMainWorkflow(
-											domainContext,
-											context.logger,
-											refreshedAttempt.workflowId,
-										);
-										await compactSuccessfulBuilderMemory({
-											context,
-											binding: builderMemoryBinding,
-											activeBuilderSession,
-											domainContext,
-											workflowId: refreshedAttempt.workflowId,
-											workItemId,
-											mainWorkflowPath,
-											mainWorkflowAttempt: refreshedAttempt,
-											lastRequestedChange: input.task,
-											finalText,
-											shouldUseBuilderMemory,
-										});
-										const outcome = await buildOutcomeWithLatestVerification(
-											context,
-											workItemId,
-											taskId,
-											refreshedAttempt,
-											finalText,
-										);
-										return {
-											text: finalText,
-											outcome,
-										};
-									}
-
-									const resubmitErrors =
-										refreshedAttempt?.errors?.join(' ') ??
-										formatSubmitWorkflowErrors(resubmit, 'Auto-re-submit failed.');
-									if (
-										refreshedAttempt &&
-										!refreshedAttempt.success &&
-										shouldRecoverSavedWorkflowAfterFailedSubmit(refreshedAttempt)
-									) {
-										const recovered = resultFromLaterFailedMainSubmit({
-											failedAttempt: refreshedAttempt,
-											submitAttempts: submitAttemptHistory,
-											mainWorkflowPath,
-											workItemId,
-											runId: context.runId,
-											taskId,
-										});
-										if (recovered) {
-											await promoteMainWorkflow(
-												domainContext,
-												context.logger,
-												recovered.outcome.workflowId,
-											);
-											return await finalizeBuildResult(context, workItemId, recovered);
-										}
-									}
-									const text = `Error: auto-re-submit of edited /src/workflow.ts failed. ${resubmitErrors}`;
-									return {
-										text,
-										outcome: buildOutcome(
-											workItemId,
-											context.runId,
-											taskId,
-											refreshedAttempt ?? undefined,
-											text,
-										),
-									};
-								}
-							}
-
-							await promoteMainWorkflow(
-								domainContext,
-								context.logger,
-								mainWorkflowAttempt.workflowId,
-							);
-							await compactSuccessfulBuilderMemory({
-								context,
-								binding: builderMemoryBinding,
-								activeBuilderSession,
-								domainContext,
-								workflowId: mainWorkflowAttempt.workflowId,
-								workItemId,
-								mainWorkflowPath,
-								mainWorkflowAttempt,
-								lastRequestedChange: input.task,
-								finalText,
-								shouldUseBuilderMemory,
-							});
-							const outcome = await buildOutcomeWithLatestVerification(
-								context,
-								workItemId,
-								taskId,
-								mainWorkflowAttempt,
-								finalText,
-							);
-							return {
-								text: finalText,
-								outcome,
-							};
-						}
-
-						let fallbackMainWorkflowId: string | undefined;
-						recordSuccessfulWorkflowBuilds(builderTools.get('build-workflow'), (workflowId) => {
-							fallbackMainWorkflowId = workflowId;
-						});
-
-						const tracedBuilderTools = traceSubAgentTools(
-							context,
-							builderTools,
-							'workflow-builder',
-						);
-
-						const subAgent = new Agent('Workflow Builder Agent')
-							.model(context.modelId)
-							.instructions(prompt, {
-								providerOptions: {
-									anthropic: { cacheControl: { type: 'ephemeral' } },
-								},
-							})
-							.tool(toolRegistryValues(tracedBuilderTools))
-							.checkpoint(context.checkpointStore ?? 'memory');
-						const runtimeSkills = context.runtimeWorkspaceSkills ?? context.runtimeSkills;
-						if (hasRuntimeSkills(runtimeSkills)) {
-							subAgent.skills(runtimeSkills);
-						}
-						const telemetry = traceContext?.getTelemetry?.({
-							agentRole: 'workflow-builder',
-							functionId: 'instance-ai.subagent.workflow-builder',
-							executionMode: 'background_subagent',
-							metadata: { agent_id: subAgentId, task_id: taskId },
-						});
-						if (telemetry) {
-							subAgent.telemetry(telemetry);
-						}
-						mergeTraceRunInputs(
-							traceContext?.actorRun,
-							buildAgentTraceInputs({
-								systemPrompt: prompt,
-								tools: tracedBuilderTools,
-								runtimeSkills: context.runtimeSkills?.registry,
-								modelId: context.modelId,
-							}),
-						);
-
-						const resumeOptions: Record<string, unknown> = {
+					const subAgent = new Agent('Workflow Builder Agent')
+						.model(context.modelId)
+						.instructions(prompt, {
 							providerOptions: {
 								anthropic: { cacheControl: { type: 'ephemeral' } },
 							},
-						};
+						})
+						.tool(toolRegistryValues(tracedBuilderTools))
+						.workspace(workspace)
+						.checkpoint(context.checkpointStore ?? 'memory');
+					if (hasRuntimeSkills(runtimeSkills)) {
+						subAgent.skills(runtimeSkills);
+					}
+					if (builderMemory) {
+						subAgent.memory(builderMemory);
+					}
+					const telemetry = traceContext?.getTelemetry?.({
+						agentRole: 'workflow-builder',
+						functionId: 'instance-ai.subagent.workflow-builder',
+						executionMode: 'background_subagent',
+						metadata: { agent_id: subAgentId, task_id: taskId },
+					});
+					if (telemetry) {
+						subAgent.telemetry(telemetry);
+					}
+					mergeTraceRunInputs(
+						traceContext?.actorRun,
+						buildAgentTraceInputs({
+							systemPrompt: prompt,
+							tools: tracedBuilderTools,
+							runtimeTools: runtimeWorkspaceTools,
+							runtimeSkills: runtimeSkills?.registry,
+							modelId: context.modelId,
+						}),
+					);
+
+					let finalText: string;
+					try {
 						const persistence = await createSubAgentPersistence(context, {
 							agentKind: 'workflow-builder',
 							threadId: builderThreadId,
 							resourceId: builderResourceId,
 						});
+						const resumeOptions: Record<string, unknown> = {
+							providerOptions: {
+								anthropic: { cacheControl: { type: 'ephemeral' } },
+							},
+						};
 						const stream = await subAgent.stream(briefing, {
 							maxIterations: MAX_STEPS.BUILDER,
 							abortSignal: signal,
@@ -1496,41 +1156,266 @@ export async function startBuildWorkflowAgentTask(
 							persistence,
 						});
 
-						const toolFinalText = await requireCompletedHitlText(
-							hitlResult,
-							'Workflow builder sub-agent',
-						);
-						await promoteMainWorkflow(domainContext, context.logger, fallbackMainWorkflowId);
-						return { text: toolFinalText };
-					} finally {
-						if (activeBuilderSession && context.builderSandboxSessionRegistry) {
-							await context.builderSandboxSessionRegistry.release(activeBuilderSession.sessionId, {
-								keep: !signal.aborted,
-								reason: signal.aborted ? 'aborted' : 'builder_run_finished',
+						finalText = await requireCompletedHitlText(hitlResult, 'Workflow builder sub-agent');
+					} catch (error) {
+						const recovered = resultFromPostStreamError({
+							error,
+							submitAttempts: submitAttemptHistory,
+							mainWorkflowPath,
+							workItemId,
+							runId: context.runId,
+							taskId,
+						});
+						if (recovered) {
+							await promoteMainWorkflow(
+								domainContext,
+								context.logger,
+								recovered.outcome.workflowId,
+							);
+							return await finalizeBuildResult(context, workItemId, recovered);
+						}
+						throw error;
+					}
+
+					const mainWorkflowAttempt = submitAttempts.get(mainWorkflowPath);
+					const currentMainWorkflow = await readFileViaSandbox(workspace, mainWorkflowPath);
+					const currentMainWorkflowHash = hashContent(currentMainWorkflow);
+
+					if (!mainWorkflowAttempt) {
+						const text = 'Error: workflow builder finished without submitting /src/workflow.ts.';
+						return {
+							text,
+							outcome: buildOutcome(workItemId, context.runId, taskId, undefined, text),
+						};
+					}
+
+					if (!mainWorkflowAttempt.success) {
+						const recovered = resultFromLaterFailedMainSubmit({
+							failedAttempt: mainWorkflowAttempt,
+							submitAttempts: submitAttemptHistory,
+							mainWorkflowPath,
+							workItemId,
+							runId: context.runId,
+							taskId,
+						});
+						if (recovered) {
+							await promoteMainWorkflow(
+								domainContext,
+								context.logger,
+								recovered.outcome.workflowId,
+							);
+							return await finalizeBuildResult(context, workItemId, recovered);
+						}
+
+						const errorText =
+							mainWorkflowAttempt.errors?.join(' ') ?? 'Unknown submit-workflow failure.';
+						const text = `Error: workflow builder stopped after a failed submit-workflow for /src/workflow.ts. ${errorText}`;
+						return {
+							text,
+							outcome: buildOutcome(workItemId, context.runId, taskId, mainWorkflowAttempt, text),
+						};
+					}
+
+					if (mainWorkflowAttempt.sourceHash !== currentMainWorkflowHash) {
+						// Builder edited the file after its last submit — auto-re-submit
+						// instead of discarding the agent's work.
+						const submitTool = tracedBuilderTools.get('submit-workflow');
+						if (submitTool?.handler) {
+							const resubmit = (await submitTool.handler(
+								{
+									filePath: mainWorkflowPath,
+									workflowId: mainWorkflowAttempt.workflowId,
+								},
+								{},
+							)) as SubmitWorkflowOutput;
+
+							const refreshedAttempt = attemptFromAutoResubmit({
+								latestAttempt: submitAttempts.get(mainWorkflowPath),
+								resubmit,
+								filePath: mainWorkflowPath,
+								sourceHash: currentMainWorkflowHash,
 							});
-						} else {
-							await builderWs?.cleanup();
+							if (resubmit.success && refreshedAttempt?.success) {
+								await promoteMainWorkflow(
+									domainContext,
+									context.logger,
+									refreshedAttempt.workflowId,
+								);
+								await compactSuccessfulBuilderMemory({
+									context,
+									binding: builderMemoryBinding,
+									domainContext,
+									workflowId: refreshedAttempt.workflowId,
+									workItemId,
+									mainWorkflowPath,
+									mainWorkflowAttempt: refreshedAttempt,
+									lastRequestedChange: input.task,
+									finalText,
+									shouldUseBuilderMemory,
+								});
+								const outcome = await buildOutcomeWithLatestVerification(
+									context,
+									workItemId,
+									taskId,
+									refreshedAttempt,
+									finalText,
+								);
+								return {
+									text: finalText,
+									outcome,
+								};
+							}
+
+							const resubmitErrors =
+								refreshedAttempt?.errors?.join(' ') ??
+								formatSubmitWorkflowErrors(resubmit, 'Auto-re-submit failed.');
+							if (
+								refreshedAttempt &&
+								!refreshedAttempt.success &&
+								shouldRecoverSavedWorkflowAfterFailedSubmit(refreshedAttempt)
+							) {
+								const recovered = resultFromLaterFailedMainSubmit({
+									failedAttempt: refreshedAttempt,
+									submitAttempts: submitAttemptHistory,
+									mainWorkflowPath,
+									workItemId,
+									runId: context.runId,
+									taskId,
+								});
+								if (recovered) {
+									await promoteMainWorkflow(
+										domainContext,
+										context.logger,
+										recovered.outcome.workflowId,
+									);
+									return await finalizeBuildResult(context, workItemId, recovered);
+								}
+							}
+							const text = `Error: auto-re-submit of edited /src/workflow.ts failed. ${resubmitErrors}`;
+							return {
+								text,
+								outcome: buildOutcome(
+									workItemId,
+									context.runId,
+									taskId,
+									refreshedAttempt ?? undefined,
+									text,
+								),
+							};
 						}
 					}
-				}),
-		});
-	} catch (error) {
-		if (reusedBuilderSession) {
-			void context.builderSandboxSessionRegistry?.release(reusedBuilderSession.sessionId, {
-				keep: true,
-				reason: 'spawn_failed',
-			});
-		}
-		throw error;
-	}
+
+					await promoteMainWorkflow(domainContext, context.logger, mainWorkflowAttempt.workflowId);
+					await compactSuccessfulBuilderMemory({
+						context,
+						binding: builderMemoryBinding,
+						domainContext,
+						workflowId: mainWorkflowAttempt.workflowId,
+						workItemId,
+						mainWorkflowPath,
+						mainWorkflowAttempt,
+						lastRequestedChange: input.task,
+						finalText,
+						shouldUseBuilderMemory,
+					});
+					const outcome = await buildOutcomeWithLatestVerification(
+						context,
+						workItemId,
+						taskId,
+						mainWorkflowAttempt,
+						finalText,
+					);
+					return {
+						text: finalText,
+						outcome,
+					};
+				}
+
+				let fallbackMainWorkflowId: string | undefined;
+				recordSuccessfulWorkflowBuilds(builderTools.get('build-workflow'), (workflowId) => {
+					fallbackMainWorkflowId = workflowId;
+				});
+
+				const tracedBuilderTools = traceSubAgentTools(context, builderTools, 'workflow-builder');
+
+				const subAgent = new Agent('Workflow Builder Agent')
+					.model(context.modelId)
+					.instructions(prompt, {
+						providerOptions: {
+							anthropic: { cacheControl: { type: 'ephemeral' } },
+						},
+					})
+					.tool(toolRegistryValues(tracedBuilderTools))
+					.checkpoint(context.checkpointStore ?? 'memory');
+				const runtimeSkills = context.runtimeWorkspaceSkills ?? context.runtimeSkills;
+				if (hasRuntimeSkills(runtimeSkills)) {
+					subAgent.skills(runtimeSkills);
+				}
+				const telemetry = traceContext?.getTelemetry?.({
+					agentRole: 'workflow-builder',
+					functionId: 'instance-ai.subagent.workflow-builder',
+					executionMode: 'background_subagent',
+					metadata: { agent_id: subAgentId, task_id: taskId },
+				});
+				if (telemetry) {
+					subAgent.telemetry(telemetry);
+				}
+				mergeTraceRunInputs(
+					traceContext?.actorRun,
+					buildAgentTraceInputs({
+						systemPrompt: prompt,
+						tools: tracedBuilderTools,
+						runtimeSkills: context.runtimeSkills?.registry,
+						modelId: context.modelId,
+					}),
+				);
+
+				const resumeOptions: Record<string, unknown> = {
+					providerOptions: {
+						anthropic: { cacheControl: { type: 'ephemeral' } },
+					},
+				};
+				const persistence = await createSubAgentPersistence(context, {
+					agentKind: 'workflow-builder',
+					threadId: builderThreadId,
+					resourceId: builderResourceId,
+				});
+				const stream = await subAgent.stream(briefing, {
+					maxIterations: MAX_STEPS.BUILDER,
+					abortSignal: signal,
+					persistence,
+					providerOptions: {
+						anthropic: { cacheControl: { type: 'ephemeral' } },
+					},
+				});
+
+				const hitlResult = await consumeStreamWithHitl({
+					agent: subAgent,
+					stream,
+					runId: context.runId,
+					agentId: subAgentId,
+					eventBus: context.eventBus,
+					logger: context.logger,
+					threadId: context.threadId,
+					abortSignal: signal,
+					waitForConfirmation: context.waitForConfirmation,
+					drainCorrections,
+					waitForCorrection,
+					maxIterations: MAX_STEPS.BUILDER,
+					resumeOptions,
+					persistence,
+				});
+
+				const toolFinalText = await requireCompletedHitlText(
+					hitlResult,
+					'Workflow builder sub-agent',
+				);
+				await promoteMainWorkflow(domainContext, context.logger, fallbackMainWorkflowId);
+				return { text: toolFinalText };
+			}),
+	});
 
 	if (spawnOutcome.status === 'duplicate') {
-		if (reusedBuilderSession) {
-			void context.builderSandboxSessionRegistry?.release(reusedBuilderSession.sessionId, {
-				keep: true,
-				reason: 'spawn_duplicate',
-			});
-		}
 		return {
 			result: `Workflow build already in progress (task: ${spawnOutcome.existing.taskId}). Acknowledge and wait for the planned-task-follow-up — do not dispatch again.`,
 			taskId: spawnOutcome.existing.taskId,
@@ -1538,12 +1423,6 @@ export async function startBuildWorkflowAgentTask(
 		};
 	}
 	if (spawnOutcome.status === 'limit-reached') {
-		if (reusedBuilderSession) {
-			void context.builderSandboxSessionRegistry?.release(reusedBuilderSession.sessionId, {
-				keep: true,
-				reason: 'spawn_limit_reached',
-			});
-		}
 		return {
 			result:
 				'Could not start build: concurrent background-task limit reached. Wait for an existing task to finish and try again.',
