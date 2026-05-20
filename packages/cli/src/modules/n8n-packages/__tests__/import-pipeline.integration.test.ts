@@ -1,3 +1,4 @@
+import { LicenseState } from '@n8n/backend-common';
 import { createTeamProject, testDb, testModules } from '@n8n/backend-test-utils';
 import { ProjectRepository, SharedWorkflowRepository, WorkflowRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
@@ -8,6 +9,7 @@ import { EventService } from '@/events/event.service';
 
 import { createFolder } from '@test-integration/db/folders';
 import { createMember, createOwner } from '@test-integration/db/users';
+import { LicenseMocker } from '@test-integration/license';
 
 import { N8nPackagesService } from '../n8n-packages.service';
 import { TarPackageWriter } from '../io/tar/tar-package-writer';
@@ -45,8 +47,8 @@ const validWorkflow = (id: string, name: string): SerializedWorkflow => ({
 
 /**
  * Workflow with a structurally invalid connection: the source node referenced
- * by `connections` does not exist in `nodes`. `validateWorkflowStructure` (run
- * inside WorkflowImporter) rejects this.
+ * by `connections` does not exist in `nodes`. `validateWorkflowStructure`
+ * rejects this during the pipeline's pre-pass.
  */
 const brokenWorkflow = (id: string, name: string): SerializedWorkflow => ({
 	id,
@@ -96,9 +98,12 @@ async function buildPackage(workflows: SerializedWorkflow[]): Promise<Buffer> {
 	return await streamToBuffer(writer.finalize());
 }
 
+const licenseMocker = new LicenseMocker();
+
 beforeAll(async () => {
 	await testModules.loadModules(['n8n-packages']);
 	await testDb.init();
+	licenseMocker.mockLicenseState(Container.get(LicenseState));
 });
 
 afterAll(async () => {
