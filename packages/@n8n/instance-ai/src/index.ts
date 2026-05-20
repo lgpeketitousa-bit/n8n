@@ -49,6 +49,19 @@ export {
 	hasRuntimeSkills,
 	loadInstanceAiRuntimeSkillSource,
 } from './skills/runtime-skills';
+export {
+	materializeRuntimeSkillsIntoWorkspace,
+	attachRuntimeSkillEnvironment,
+	SANDBOX_RUNTIME_SKILLS_DIR,
+	SANDBOX_RUNTIME_SKILL_REGISTRY_FILE,
+	N8N_SKILLS_DIR_ENV,
+	N8N_SKILL_DIR_ENV,
+	N8N_WORKSPACE_DIR_ENV,
+} from './skills/materialize-runtime-skills';
+export type {
+	MaterializedRuntimeSkill,
+	MaterializedRuntimeSkills,
+} from './skills/materialize-runtime-skills';
 export { createAllTools, createOrchestrationTools } from './tools';
 export { startBuildWorkflowAgentTask } from './tools/orchestration/build-workflow-agent.tool';
 export {

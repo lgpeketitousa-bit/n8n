@@ -216,6 +216,7 @@ export async function createInstanceAgent(options: CreateInstanceAgentOptions): 
 				: undefined,
 			toolSearchEnabled: hasDeferrableTools,
 			inputProcessors: hasDeferrableTools ? ['NativeToolSearch'] : undefined,
+			runtimeSkills: runtimeSkills?.registry,
 		}),
 	);
 

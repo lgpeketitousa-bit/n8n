@@ -31,6 +31,7 @@ import { buildSubAgentBriefing } from '../../agent/sub-agent-briefing';
 import { MAX_STEPS } from '../../constants/max-steps';
 import type { Logger } from '../../logger';
 import type { BuilderSandboxSession } from '../../runtime/builder-sandbox-session-registry';
+import { materializeRuntimeSkillsIntoWorkspace } from '../../skills/materialize-runtime-skills';
 import { hasRuntimeSkills } from '../../skills/runtime-skills';
 import { consumeStreamWithHitl, requireCompletedHitlText } from '../../stream/consume-with-hitl';
 import { createToolRegistry, toolRegistryKeys, toolRegistryValues } from '../../tool-registry';
@@ -1051,6 +1052,16 @@ export async function startBuildWorkflowAgentTask(
 								root = await getWorkspaceRoot(workspace);
 							}
 
+							const materializedRuntimeSkills = hasRuntimeSkills(context.runtimeSkills)
+								? await materializeRuntimeSkillsIntoWorkspace({
+										source: context.runtimeSkills,
+										workspace,
+										root,
+										logger: context.logger,
+									})
+								: undefined;
+							const runtimeSkills = materializedRuntimeSkills?.source ?? context.runtimeSkills;
+
 							prompt = createSandboxBuilderAgentPrompt(root);
 							if (!activeBuilderSession && builderWs) {
 								activeBuilderSession = context.builderSandboxSessionRegistry?.create({
@@ -1151,8 +1162,8 @@ export async function startBuildWorkflowAgentTask(
 								.tool(toolRegistryValues(tracedBuilderTools))
 								.workspace(workspace)
 								.checkpoint(context.checkpointStore ?? 'memory');
-							if (hasRuntimeSkills(context.runtimeSkills)) {
-								subAgent.skills(context.runtimeSkills);
+							if (hasRuntimeSkills(runtimeSkills)) {
+								subAgent.skills(runtimeSkills);
 							}
 							if (builderMemory) {
 								subAgent.memory(builderMemory);
@@ -1172,6 +1183,7 @@ export async function startBuildWorkflowAgentTask(
 									systemPrompt: prompt,
 									tools: tracedBuilderTools,
 									runtimeTools: runtimeWorkspaceTools,
+									runtimeSkills: runtimeSkills?.registry,
 									modelId: context.modelId,
 								}),
 							);
@@ -1442,6 +1454,7 @@ export async function startBuildWorkflowAgentTask(
 							buildAgentTraceInputs({
 								systemPrompt: prompt,
 								tools: tracedBuilderTools,
+								runtimeSkills: context.runtimeSkills?.registry,
 								modelId: context.modelId,
 							}),
 						);

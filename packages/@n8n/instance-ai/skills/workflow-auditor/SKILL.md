@@ -23,9 +23,9 @@ Review n8n workflow exports and produce a concise production-readiness audit.
 node ${N8N_SKILL_DIR}/scripts/audit-workflow.mjs <workflow-json-path>
 ```
 
-4. Read `/home/daytona/workspace/workflow-audit-helper.json`.
+4. Read `${N8N_WORKSPACE_DIR}/workflow-audit-helper.json`.
 5. Write the final human-readable audit to
-   `/home/daytona/workspace/workflow-audit.md`.
+   `${N8N_WORKSPACE_DIR}/workflow-audit.md`.
 6. Report the top risks, recommended fixes, and whether the workflow is safe to
    activate.
 

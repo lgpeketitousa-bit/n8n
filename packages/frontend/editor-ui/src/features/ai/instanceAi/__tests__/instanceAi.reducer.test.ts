@@ -318,6 +318,14 @@ describe('instanceAi.reducer', () => {
 			expect(tc.renderHint).toBe('tasks');
 		});
 
+		test('tool-call assigns skill render hint for skill tools', () => {
+			const state = stateWithRun('run-1', 'agent-root');
+			handleEvent(state, makeToolCallEvent('run-1', 'agent-root', 'tc-1', 'skill_view'));
+
+			const tc = state.messages[0].agentTree!.toolCalls[0];
+			expect(tc.renderHint).toBe('skill');
+		});
+
 		test('tool-result resolves matching toolCallId with isLoading=false and result set', () => {
 			const state = stateWithRun('run-1', 'agent-root');
 			handleEvent(state, makeToolCallEvent('run-1', 'agent-root', 'tc-1', 'some-tool'));

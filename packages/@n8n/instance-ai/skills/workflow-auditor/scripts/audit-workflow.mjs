@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+const workspaceDir = process.env.N8N_WORKSPACE_DIR ?? '/home/daytona/workspace';
 const outputPath =
-	process.env.WORKFLOW_AUDIT_OUTPUT ?? '/home/daytona/workspace/workflow-audit-helper.json';
+	process.env.WORKFLOW_AUDIT_OUTPUT ?? `${workspaceDir}/workflow-audit-helper.json`;
 const workflowPath = process.argv[2];
 
 if (!workflowPath) {

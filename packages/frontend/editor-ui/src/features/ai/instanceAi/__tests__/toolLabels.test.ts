@@ -9,6 +9,9 @@ vi.mock('@n8n/i18n', () => ({
 				'instanceAi.tools.nodes': 'Search nodes',
 				'instanceAi.tools.executions': 'Run workflow',
 				'instanceAi.tools.workspace_execute_command': 'Running command',
+				'instanceAi.tools.workspace_execute_command.skill': 'Running skill script',
+				'instanceAi.tools.skills_list': 'Checking skills',
+				'instanceAi.tools.skill_view': 'Loading skill',
 				'instanceAi.stepTimeline.showData': 'Show data',
 				'instanceAi.stepTimeline.hideData': 'Hide data',
 				'instanceAi.stepTimeline.showBrief': 'Show brief',
@@ -80,6 +83,11 @@ describe('getToolIcon', () => {
 		expect(getToolIcon('workspace_read_file')).toBe('folder');
 	});
 
+	test('returns book-open for skill tools', () => {
+		expect(getToolIcon('skills_list')).toBe('book-open');
+		expect(getToolIcon('skill_view')).toBe('book-open');
+	});
+
 	test('returns settings as default', () => {
 		expect(getToolIcon('unknown-tool')).toBe('settings');
 	});
@@ -90,6 +98,22 @@ describe('useToolLabel', () => {
 		const { getToolLabel } = useToolLabel();
 		expect(getToolLabel('nodes')).toBe('Search nodes');
 		expect(getToolLabel('workspace_execute_command')).toBe('Running command');
+		expect(getToolLabel('skills_list')).toBe('Checking skills');
+		expect(getToolLabel('skill_view', { name: 'workflow-auditor' })).toBe(
+			'Loading skill: workflow-auditor',
+		);
+		expect(
+			getToolLabel('skill_view', { name: 'workflow-auditor', filePath: 'scripts/a.mjs' }),
+		).toBe('Loading skill: workflow-auditor/scripts/a.mjs');
+	});
+
+	test('getToolLabel shows skill script commands cleanly', () => {
+		const { getToolLabel } = useToolLabel();
+		expect(
+			getToolLabel('workspace_execute_command', {
+				command: 'node /home/daytona/workspace/skills/workflow-auditor/scripts/audit.mjs',
+			}),
+		).toBe('Running skill script');
 	});
 
 	test('getToolLabel falls back to raw tool name when not found', () => {

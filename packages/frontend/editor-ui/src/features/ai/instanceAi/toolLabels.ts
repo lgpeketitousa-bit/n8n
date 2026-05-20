@@ -4,10 +4,12 @@ import type { IconName } from '@n8n/design-system';
 import type { InstanceAiToolCallState } from '@n8n/api-types';
 
 const NO_TOGGLE_TOOLS = new Set(['updateWorkingMemory', 'plan', 'task-control']);
+const N8N_SKILL_DIR_TEMPLATE = '$' + '{N8N_SKILL_DIR}';
 
 export function getToolIcon(toolName: string): IconName {
 	if (toolName === 'complete-checkpoint') return 'circle-check';
 	if (toolName === 'delegate' || toolName.endsWith('-with-agent')) return 'share';
+	if (toolName === 'skills_list' || toolName === 'skill_view') return 'book-open';
 	if (toolName === 'data-tables') return 'table';
 	if (
 		toolName === 'workflows' ||
@@ -42,6 +44,29 @@ export function useToolLabel() {
 	const i18n = useI18n();
 
 	function getToolLabel(toolName: string, args?: Record<string, unknown>): string {
+		if (toolName === 'skill_view') {
+			const name = typeof args?.name === 'string' ? args.name : undefined;
+			const filePath = typeof args?.filePath === 'string' ? args.filePath : undefined;
+			const key = `instanceAi.tools.${toolName}` as BaseTextKey;
+			const translated = i18n.baseText(key);
+			const label = translated === key ? toolName : translated;
+			if (name && filePath) return `${label}: ${name}/${filePath}`;
+			if (name) return `${label}: ${name}`;
+			return label;
+		}
+
+		if (
+			toolName === 'workspace_execute_command' &&
+			typeof args?.command === 'string' &&
+			(args.command.includes(N8N_SKILL_DIR_TEMPLATE) ||
+				args.command.includes('$N8N_SKILL_DIR') ||
+				args.command.includes('/skills/'))
+		) {
+			const key = 'instanceAi.tools.workspace_execute_command.skill' as BaseTextKey;
+			const translated = i18n.baseText(key);
+			if (translated !== key) return translated;
+		}
+
 		const action = typeof args?.action === 'string' ? args.action : undefined;
 		if (action) {
 			const actionKey = `instanceAi.tools.${toolName}.${action}` as BaseTextKey;
